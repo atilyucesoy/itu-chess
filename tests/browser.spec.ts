@@ -1,0 +1,274 @@
+import { test, expect } from "@playwright/test";
+
+test("Turkish website: login, registry, event, pairing, results, finish, next-event ITU seed and mobile", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Güzel oyunlar, iyi arkadaşlar." }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Yönetici girişi" }).click();
+  await page.getByLabel("Kullanıcı adı", { exact: true }).fill("testowner");
+  await page.getByLabel("Şifre", { exact: true }).fill("test-password-12345");
+  await page.getByRole("button", { name: "Giriş yap", exact: true }).click();
+  await expect(page.getByText("Hoş geldin, Test Yöneticisi")).toBeVisible();
+  await page.getByRole("link", { name: "Oyuncular", exact: true }).click();
+  await page.getByRole("button", { name: "Oyuncu ekle" }).click();
+  await page.getByLabel("Ad soyad").fill("Deniz Yılmaz");
+  await page.getByRole("spinbutton", { name: /Resmî rating/ }).fill("1800");
+  await page.getByRole("button", { name: "Oyuncuyu kaydet" }).click();
+  await expect(
+    page.getByRole("button", { name: "D Deniz Yılmaz" }),
+  ).toBeVisible();
+  const names = [
+    "Ece Kaya",
+    "Can Demir",
+    "Ada Çelik",
+    "Arda Koç",
+    "Duru Şahin",
+    "Bora Akın",
+    "Selin Işık",
+  ];
+  for (let i = 0; i < names.length; i++) {
+    const snapshot = await (await page.request.get("/api/state")).json();
+    const res = await page.request.post("/api/action", {
+      data: {
+        revision: snapshot.revision,
+        action: "player.create",
+        payload: {
+          name: names[i],
+          official: i < 3 ? 1700 - i * 50 : null,
+          officialType: "UKD",
+        },
+      },
+    });
+    expect(res.ok()).toBeTruthy();
+  }
+  await page.reload();
+  await page.getByRole("link", { name: "Turnuvalar", exact: true }).click();
+  await page.getByRole("button", { name: "Yeni turnuva", exact: true }).click();
+  await page.getByLabel("Turnuva adı").fill("Cuma Yıldırım · Test");
+  await page.getByLabel("Tur sayısı").fill("1");
+  await page
+    .getByRole("button", { name: "Turnuva oluştur", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Cuma Yıldırım · Test/ }).click();
+  await page.getByRole("button", { name: "Tümünü seç" }).click();
+  await page.getByRole("button", { name: "8 oyuncuyu kaydet" }).click();
+  await page.getByRole("button", { name: "İlk turu eşlendir" }).click();
+  await expect(
+    page.getByRole("heading", { name: "1. tur eşlendirmeleri" }),
+  ).toBeVisible();
+  for (let board = 1; board <= 4; board++)
+    await page
+      .getByLabel(`Masa ${board} sonucu`, { exact: true })
+      .selectOption(board % 2 ? "1-0" : "0-1");
+  page.on("dialog", (d) => d.accept());
+  const lots = page.getByRole("button", { name: "Eşitlik kurasını çek" });
+  if (await lots.isVisible()) await lots.click();
+  await page
+    .getByRole("button", { name: "Turnuvayı tamamla", exact: true })
+    .click();
+  await expect(page.getByText("TURNUVANIN PODYUMU")).toBeVisible();
+  await page.getByRole("button", { name: "Sıralama", exact: true }).click();
+  await expect(
+    page.getByRole("columnheader", { name: "İTÜ Elo değişimi" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/tournament-desktop.png",
+    fullPage: true,
+  });
+  const snapshot = await (await page.request.get("/api/state")).json();
+  expect(
+    snapshot.state.players.every((p: { itu: number | null }) => p.itu !== null),
+  ).toBeTruthy();
+  const res = await page.request.post("/api/action", {
+    data: {
+      revision: snapshot.revision,
+      action: "tournament.create",
+      payload: {
+        name: "Gelecek hafta",
+        date: "2026-11-14",
+        semester: "Test Güz",
+        roundsPlanned: 7,
+        timeControl: "3+2",
+        variant: "standard",
+        countsPoints: true,
+        countsRating: true,
+      },
+    },
+  });
+  expect(res.ok()).toBeTruthy();
+  const afterCreate = await (await page.request.get("/api/state")).json();
+  const next = afterCreate.state.tournaments.at(-1);
+  await page.request.post("/api/action", {
+    data: {
+      revision: afterCreate.revision,
+      action: "tournament.entries",
+      payload: {
+        tournamentId: next.id,
+        playerIds: snapshot.state.players.map((p: { id: string }) => p.id),
+      },
+    },
+  });
+  const afterEntry = await (await page.request.get("/api/state")).json();
+  const gen = await page.request.post("/api/action", {
+    data: {
+      revision: afterEntry.revision,
+      action: "round.generate",
+      payload: { tournamentId: next.id },
+    },
+  });
+  expect(gen.ok()).toBeTruthy();
+  const final = await (await page.request.get("/api/state")).json();
+  for (const e of final.state.tournaments.at(-1).entries)
+    expect(e.seed).toBe(
+      final.state.players.find((p: { id: string }) => p.id === e.playerId).itu,
+    );
+  await page.goto("/#home");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Güzel oyunlar, iyi arkadaşlar." }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/home-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(() =>
+      page
+        .locator(".sidebar")
+        .evaluate((el) => el.getBoundingClientRect().right),
+    )
+    .toBeLessThanOrEqual(0);
+  await page.screenshot({
+    path: "test-results/home-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.getByRole("button", { name: "Menü", exact: true }).click();
+  await page.getByRole("link", { name: "Turnuvalar", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Turnuvalar", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Gelecek hafta/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "1. tur eşlendirmeleri" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/pairings-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.getByRole("button", { name: "Koyu tema" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.goto("/#settings");
+  await expect(
+    page.getByRole("heading", { name: "Kulüp ayarları", exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Geçici K katsayısı", { exact: true }).fill("48");
+  await page.getByRole("button", { name: "Politikayı kaydet" }).click();
+  await expect(
+    page.getByLabel("Geçici K katsayısı", { exact: true }),
+  ).toHaveValue("48");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+test("API: private data, organizer permissions, edit conflicts, origin checks, backups", async ({
+  request,
+  playwright,
+}) => {
+  const anonymous = await (await request.get("/api/state")).json();
+  expect(anonymous.state.managers).toBeUndefined();
+  expect(anonymous.state.overrides).toEqual([]);
+  expect(anonymous.state.audit).toEqual([]);
+  expect((await request.get("/api/backup")).status()).toBe(403);
+  expect(
+    (
+      await request.post("/api/action", {
+        data: {
+          revision: anonymous.revision,
+          action: "player.create",
+          payload: {},
+        },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await request.post("/api/login", {
+        headers: { Origin: "https://evil.example" },
+        data: { username: "testowner", password: "test-password-12345" },
+      })
+    ).status(),
+  ).toBe(403);
+  await request.post("/api/login", {
+    data: { username: "testowner", password: "test-password-12345" },
+  });
+  const first = await (await request.get("/api/state")).json();
+  const create = await request.post("/api/action", {
+    data: {
+      revision: first.revision,
+      action: "manager.create",
+      payload: {
+        username: "friend",
+        name: "Organizatör",
+        password: "organizer-password-123",
+      },
+    },
+  });
+  expect(create.ok()).toBeTruthy();
+  const conflict = await request.post("/api/action", {
+    data: {
+      revision: first.revision,
+      action: "policy.save",
+      payload: first.state.policy,
+    },
+  });
+  expect(conflict.status()).toBe(409);
+  const organizer = await playwright.request.newContext({
+    baseURL: "http://127.0.0.1:3099",
+  });
+  expect(
+    (
+      await organizer.post("/api/login", {
+        data: { username: "friend", password: "organizer-password-123" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const current = await (await organizer.get("/api/state")).json();
+  expect((await organizer.get("/api/backup")).status()).toBe(403);
+  expect((await organizer.get("/api/managers")).status()).toBe(403);
+  expect(
+    (
+      await organizer.post("/api/action", {
+        data: {
+          revision: current.revision,
+          action: "policy.save",
+          payload: current.state.policy,
+        },
+      })
+    ).status(),
+  ).toBe(400);
+  const backup = await request.get("/api/backup");
+  expect(backup.ok()).toBeTruthy();
+  expect(backup.headers()["cache-control"]).toContain("no-store");
+  expect((await backup.json()).state.managers.length).toBe(2);
+  await organizer.dispose();
+});

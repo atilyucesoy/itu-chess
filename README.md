@@ -1,0 +1,113 @@
+# İTÜ Satranç
+
+Turkish, shared chess-club tournament manager. React + TypeScript frontend, Express backend, bbpPairings **6.0.0** FIDE Dutch engine. Local SQLite or hosted Supabase Postgres.
+
+## Run locally
+
+Linux x64, Node **22.13+**, npm, `tar` required. No paid services or API keys required locally.
+
+```bash
+cd /home/atil/Projects/itu-chess
+npm ci
+npm run setup
+npm run engine:install
+npm run dev
+```
+
+Open **http://localhost:5173**. Setup prints the unique initial owner password and saves it in ignored, mode-0600 `.env`. There is **no default password**. Username: `atil`. You can change passwords and create individual organizer accounts in **Kulüp ayarları**. The bootstrap environment password is only used if no accounts exist; changing `.env` later does not reset an existing account.
+
+Local database: `data/club.sqlite`. Do not delete it or store it on an ephemeral hosted disk. The site starts empty: no invented players or results are mixed with real club data.
+
+## Weekly workflow
+
+1. Sign in, add people in **Oyuncular**, with optional FIDE standard Elo or UKD.
+2. Create an event. Defaults: **7 rounds**, **3+2**. Choose its semester and whether it contributes championship points and/or İTÜ Elo. Chess960 defaults both switches off, independently adjustable.
+3. Select existing players, or copy the most recent tournament's participant list. **Save the list** before generating the first round.
+4. Generate a round; enter wins, draws or forfeits. All results must be complete before pairing the next round.
+5. Between rounds, mark withdrawals/returns from **Oyuncular**. Withdrawn players receive explicit zero-point absences, not rating losses. Late registration after the first round is intentionally not supported in v0.1.
+6. After the planned final round, resolve any complete tie with a **recorded random lot**, then finalize. Finalization awards points and updates ratings once. It cannot be run twice.
+
+The total rounds can be changed **before starting**, not silently changed mid-event. First-round initial colour is randomly drawn once and stored. If the engine cannot create valid pairings, it reports failure; it never falls back to an improvised pairing algorithm. For very small fields, choose a feasible number of Swiss rounds before starting.
+
+### Ratings and seeding
+
+**Always İTÜ Elo first → entered official Elo/UKD → configurable reference.** At tournament start the app refreshes and freezes these values. Swiss scores, not rating proximity, drive later score groups; frozen pairing numbers provide seeding. A later official-rating edit never overrides an established İTÜ Elo.
+
+Two columns/values are displayed independently: İTÜ Elo first, official rating second. İTÜ Elo remains empty until a player completes at least one actually played game in an Elo-enabled event (or receives an explicit owner correction).
+
+Defaults, editable by the owner:
+
+- Unrated reference: **1500**. It's a temporary seed, not an initial displayed İTÜ Elo.
+- Unrated first rating: `mean(opponent starting ratings) + 400 × log10((score + 0.5)/(games − score + 0.5))`. This club estimator is smoothed for zero/perfect results and can produce a high first rating.
+- Alternative initial method: reference + ordinary Elo change.
+- Players with official ratings start from those, applying Elo change, not from zero.
+- K=40 for the first 30 played rated games, K=20 afterwards. Transition can happen within a tournament; expected scores always use frozen starting values.
+- Logistic expected score `1/(1+10^((opponent−player)/400))`. Each event's total change is rounded once. Displayed ratings are constrained to 100–3500.
+- Byes, requested absences and forfeits excluded. No effect on official Elo/UKD.
+
+This is a **club rating**, not FIDE's rating calculation. Official Elo and UKD are accepted as manually chosen seeds; they are not claimed to be identical scales. If most players are unrated, the numerical scale is anchored by the configured reference and available official seeds; results alone cannot determine an absolute scale.
+
+Policy changes affect newly started events. **Geçmişi yeniden hesapla** explicitly replays all completed rating events in finalization order with the new policy, including timestamped manual corrections. Original pairings and starting snapshots are preserved (they describe what actually happened); rating-history values are recalculated. A ratings change never re-pairs an old event. Only one rating-enabled event may be live at a time.
+
+### Standings and Grand Prix
+
+- Win 1, draw ½, loss 0. Pairing-allocated bye 1, absent 0.
+- Tie-break order: **score → Buchholz Cut-1 → Buchholz → Sonneborn-Berger → recorded lot**. Implements the March 2026 FIDE C.07 unplayed-round adjustments for the supported result types. Live tie-breaks are provisional.
+- F1 schedule: **25–18–15–12–10–8–6–4–2–1**. Only completed events with `Dönem puanlarına dahil` count.
+- Semester standings are separate; İTÜ Elo continues across semesters. Semester labels are manually entered (reuse the same spelling).
+- Season ties use countback: number of firsts, then seconds, etc. If still equal, the season table shares the rank (`=`); alphabetical ordering is display-only.
+- Medal podiums, profiles, rating graphs, CSV exports, organizer TRF export and public shareable event links.
+
+### Correcting mistakes
+
+Current-round results are editable. To change an earlier result, explicitly undo later rounds first; this removes their results too. Finalized events require owner reopening, which removes championship contributions and replays ratings. A rated event cannot be reopened while another rated event is live, or while later rated events remain finalized; work backwards from the latest. This protects downstream rating history.
+
+## Free internet hosting
+
+Nothing is deployed automatically. You need a free GitHub account, Render account and Supabase project. Organizer accounts inside the website do **not** require hosting-provider accounts.
+
+1. Create a **Supabase Free** project. Run **`supabase/schema.sql`** in its SQL editor. Tables and RPC are private to the server's service-role key; anonymous/authenticated browser clients cannot read raw state or password hashes.
+2. Put this source in a GitHub repository (exclude `.env`, `data/`, `bin/`, `node_modules/`). No Git repository or remote is created by the application.
+3. In Render, create a Blueprint using **`render.yaml`**, selecting **Free**. Or create a Node web service manually:
+   - Build: `npm ci && npm run engine:install && npm run build`
+   - Start: `npm start`
+   - Health endpoint: `/api/health`
+4. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, a 32+-character `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_NAME`, and a 12+-character `ADMIN_PASSWORD`. Set `NODE_ENV=production`, and `APP_ORIGIN` to the site's exact HTTPS origin, e.g. `https://itu-satranc.onrender.com` (no trailing slash). Blueprint generates the secret.
+5. Sign in and add your friends as organizers. Use a free `onrender.com` address; buying a domain is unnecessary.
+
+**Do not put the service-role key in any `VITE_` variable.** It belongs only on the server. Production refuses to start with local SQLite unless you explicitly opt into a genuinely persistent self-hosted disk.
+
+Free-tier caveats, checked November 2026: Render free web services sleep after 15 idle minutes and may take about a minute to wake. Supabase Free can pause after a week of inactivity and doesn't include automatic backups. Resume it manually after a long break. Render **Free Postgres expires after 30 days**, so we deliberately do not use it. Free quotas/terms can change; don't enable paid upgrades or add billing without intending to. Hosting is not guaranteed-availability infrastructure; take backups and test the site before club night.
+
+Sources: [Render Free](https://render.com/docs/free), [Supabase pricing](https://supabase.com/pricing).
+
+## Security and data
+
+- Owner manages accounts, policies, manual corrections, replay and full backups. Organizers manage participants, tournaments and results. Public visitors have read-only access.
+- Passwords use salted scrypt hashes. Signed sessions expire after 12 hours, use HttpOnly, SameSite=Strict, and Secure in production. Changing a password or removing an account revokes its sessions.
+- Origin checks, request throttling, payload validation, security headers, no-cache API responses, revision-checked atomic saves. A conflicting save is rejected rather than overwriting another organizer's work.
+- Public responses exclude accounts, raw TRFs, correction reasons and audit logs. Player names and entered ratings are public: inform participants and obtain any necessary consent. Do not enter student numbers, private contact details, or birthdates in names.
+- The owner backup includes password hashes and must be kept private. Download after events. See `npm run backup:restore -- <file> --confirm-replace` for explicit operator recovery; stop the app first. Never commit backups.
+- Audit retains the latest 2,000 action summaries (who/when/type), not a forensic history of every before/after value. Tournament snapshots and rating corrections retain their domain-specific history.
+- Data storage uses a single versioned JSON document, with atomic compare-and-swap in SQLite or a private Supabase RPC. Suitable for this small club, not intended as a large multi-tenant platform. Keep exports as independent backups.
+
+## Verification
+
+```bash
+npm test                # real engine integration + ratings + standings + auth
+npm run build           # strict TypeScript and production build
+npx playwright install chromium
+npm run test:e2e        # isolated temporary database, never real club data
+```
+
+Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts.
+
+## Pairing rules and licensing
+
+bbpPairings is downloaded from the pinned v6.0.0 release with SHA-256 verification; upstream Apache-2.0 license and notices are retained in `bin/bbpPairings-v6.0.0/`. It supports the Dutch rules effective February 2026. This application **is not FIDE-endorsed**, does not submit events to FIDE, and does not claim certification based on using an existing engine. No hand-written Swiss fallback is used.
+
+- [FIDE Dutch, February 2026](https://handbook.fide.com/chapter/C0403202602)
+- [FIDE tie-breaks, March 2026](https://handbook.fide.com/chapter/TieBreakRegulations032026)
+- [bbpPairings v6.0.0](https://github.com/BieremaBoyzProgramming/bbpPairings/releases/tag/v6.0.0)
+
+Interface inspiration: restrained Lichess-style usability, with original club styling. No Lichess branding or assets. Google Fonts are optional; local system fonts remain usable when unavailable. `src/style.css` contains the theme and responsive layouts.

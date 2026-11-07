@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: itu-satranc
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run engine:install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.23.1
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        value: atil
+      - key: ADMIN_NAME
+        value: Atıl
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: APP_ORIGIN
+        sync: false
