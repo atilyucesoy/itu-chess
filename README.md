@@ -4,7 +4,7 @@
 
 A tournament-management web application built for Istanbul Technical University's chess club: reusable player profiles, FIDE Dutch Swiss pairing, a separate club Elo system, and semester Grand Prix standings. The UI is Turkish. The application is under development; a public live deployment is not yet available.
 
-Turkish, shared chess-club tournament manager. React + TypeScript frontend, Express backend, bbpPairings **6.0.0** FIDE Dutch engine. Local SQLite or hosted Supabase Postgres.
+**Stack:** React, TypeScript, Vite, Express, SQLite / Supabase Postgres. Pairings use the external **bbpPairings 6.0.0** engine, not a simplified custom Swiss implementation.
 
 ## Run locally
 
@@ -22,6 +22,20 @@ npm run dev
 Open **http://localhost:5173**. Setup prints the unique initial owner password and saves it in ignored, mode-0600 `.env`. There is **no default password**. Username: `atil`. You can change passwords and create individual organizer accounts in **Kulüp ayarları**. The bootstrap environment password is only used if no accounts exist; changing `.env` later does not reset an existing account.
 
 Local database: `data/club.sqlite`. Do not delete it or store it on an ephemeral hosted disk. The site starts empty: no invented players or results are mixed with real club data.
+
+## Developer mode: disposable test tournaments
+
+`npm run dev` enables developer mode on the local server. Sign in as the owner, open **Kulüp ayarları → Developer mode → Deneme ortamını aç**. A persistent yellow banner identifies the test workspace. Add names such as `abc`, create a tournament, enter results and finalize normally.
+
+- The test workspace starts empty and copies **only the rating policy**, never actual players, tournaments or accounts.
+- All test state lives in an isolated **in-memory store**, not the club's SQLite/Supabase database. It does not enter real rating history, points, audit records or backups.
+- **Denemeyi sıfırla** clears all test players, events, rating changes, corrections and audit entries. **Kulüp kayıtlarına dön** clears and discards the test workspace before returning to actual club data.
+- Test state is also discarded on logout, server restart or after four hours. An expired workspace never silently accepts mutations against actual club records. Explicit workspace checks and monotonic revisions reject stale requests.
+- Only the owner can enter developer mode. Account management and full backups are disabled inside a test workspace.
+- Developer mode requires `ENABLE_DEVELOPER_MODE=1` and is **always disabled when `NODE_ENV=production`**, even if that flag is set. The bundled `dev` script sets the flag; a normal `npm start` does not.
+- Test CSV/TRF files you explicitly download are outside the workspace and are not removed from your computer by reset. Memory disposal is an application-level isolation guarantee, not a forensic secure-erasure guarantee for operating-system memory or external logs.
+
+Tabs in the same browser share the workspace cookie. Use a separate browser profile if you need to view actual club records and a test workspace simultaneously. The automated browser test verifies that a complete test tournament, reset and exit leave the actual club backup **unchanged**, including its revision.
 
 ## Weekly workflow
 
@@ -105,7 +119,7 @@ npx playwright install chromium
 npm run test:e2e        # isolated temporary database, never real club data
 ```
 
-Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts.
+Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts. Developer-mode tests cover owner-only access, production gating, memory disposal, reset races, expired-session handling and unchanged real club data. GitHub Actions runs the unit/integration tests and browser tests on pushes to `main` and pull requests.
 
 ## Pairing rules and licensing
 

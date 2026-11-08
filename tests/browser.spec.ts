@@ -52,6 +52,7 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await page.getByLabel("Turnuva adı").fill("Cuma Yıldırım · Test");
   await page.getByLabel("Tur sayısı").fill("1");
   await page
+    .getByRole("dialog")
     .getByRole("button", { name: "Turnuva oluştur", exact: true })
     .click();
   await page.getByRole("button", { name: /Cuma Yıldırım · Test/ }).click();
@@ -257,6 +258,11 @@ test("API: private data, organizer permissions, edit conflicts, origin checks, b
   expect((await organizer.get("/api/managers")).status()).toBe(403);
   expect(
     (
+      await organizer.post("/api/developer/enter", { data: { confirm: true } })
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
       await organizer.post("/api/action", {
         data: {
           revision: current.revision,
@@ -271,4 +277,160 @@ test("API: private data, organizer permissions, edit conflicts, origin checks, b
   expect(backup.headers()["cache-control"]).toContain("no-store");
   expect((await backup.json()).state.managers.length).toBe(2);
   await organizer.dispose();
+});
+
+test("developer sandbox: full tournament, reset and exit leave actual club data untouched", async ({
+  page,
+  playwright,
+}) => {
+  page.on("dialog", (d) => d.accept());
+  await page.request.post("/api/login", {
+    data: { username: "testowner", password: "test-password-12345" },
+  });
+  const real = await playwright.request.newContext({
+    baseURL: "http://127.0.0.1:3099",
+  });
+  await real.post("/api/login", {
+    data: { username: "testowner", password: "test-password-12345" },
+  });
+  const before = await (await real.get("/api/backup")).json();
+  await page.goto("/#settings");
+  await page.getByRole("button", { name: "Deneme ortamını aç" }).click();
+  await expect(
+    page.getByRole("region", { name: "Deneme ortamı" }),
+  ).toBeVisible();
+  let current = await (await page.request.get("/api/state")).json();
+  expect(current.workspace).toBe("sandbox");
+  expect(current.state.players).toEqual([]);
+  const mutate = async (action: string, payload: object) => {
+    const snapshot = await (await page.request.get("/api/state")).json();
+    const response = await page.request.post("/api/action", {
+      data: {
+        revision: snapshot.revision,
+        workspace: "sandbox",
+        action,
+        payload,
+      },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+  };
+  for (const name of ["abc-sandbox", "def-sandbox"])
+    await mutate("player.create", {
+      name,
+      official: 1800,
+      officialType: "ELO",
+    });
+  await page.reload();
+  await page.getByRole("button", { name: "Yeni turnuva", exact: true }).click();
+  await page.getByLabel("Turnuva adı").fill("abc deneme turnuvası");
+  await page.getByLabel("Tur sayısı").fill("1");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Turnuva oluştur", exact: true })
+    .click();
+  await page.getByRole("button", { name: /abc deneme turnuvası/ }).click();
+  await page.getByRole("button", { name: "Tümünü seç" }).click();
+  await page.getByRole("button", { name: "2 oyuncuyu kaydet" }).click();
+  await page.getByRole("button", { name: "İlk turu eşlendir" }).click();
+  await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
+  await page
+    .getByRole("button", { name: "Turnuvayı tamamla", exact: true })
+    .click();
+  await expect(page.getByText("TURNUVANIN PODYUMU")).toBeVisible();
+  current = await (await page.request.get("/api/state")).json();
+  expect(
+    current.state.players.every((p: { itu: number | null }) => p.itu !== null),
+  ).toBeTruthy();
+  await mutate("ratings.override", {
+    playerId: current.state.players[0].id,
+    value: 1900,
+    reason: "abc correction",
+  });
+  expect((await page.request.get("/api/backup")).status()).toBe(403);
+  expect(await (await page.request.get("/api/managers")).json()).toEqual([]);
+  current = await (await page.request.get("/api/state")).json();
+  expect(
+    (
+      await page.request.post("/api/action", {
+        data: {
+          revision: current.revision,
+          workspace: "sandbox",
+          action: "manager.create",
+          payload: {
+            name: "abc",
+            username: "abc",
+            password: "test-password-long-enough",
+          },
+        },
+      })
+    ).status(),
+  ).toBe(403);
+  const cookies = await page.context().cookies();
+  const oldCookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+  await page.reload();
+  await page.getByRole("button", { name: "Denemeyi sıfırla" }).click();
+  await expect(
+    page.getByText("Deneme verileri tamamen temizlendi."),
+  ).toBeVisible();
+  const reset = await (await page.request.get("/api/state")).json();
+  for (const key of ["players", "tournaments", "overrides", "audit"])
+    expect(reset.state[key]).toEqual([]);
+  expect(reset.revision).toBeGreaterThan(current.revision);
+  expect(
+    (
+      await page.request.post("/api/action", {
+        data: {
+          revision: current.revision,
+          workspace: "sandbox",
+          action: "player.create",
+          payload: { name: "stale-abc", official: null, officialType: "ELO" },
+        },
+      })
+    ).status(),
+  ).toBe(409);
+  await page.getByRole("button", { name: "Kulüp kayıtlarına dön" }).click();
+  await expect(page.getByRole("region", { name: "Deneme ortamı" })).toHaveCount(
+    0,
+  );
+  const after = await (await real.get("/api/backup")).json();
+  expect(after).toEqual(before);
+  const ghost = await page.request.get("/api/state", {
+    headers: { Cookie: oldCookie },
+  });
+  const ghostState = await ghost.json();
+  expect(ghostState.workspace).toBe("expired");
+  expect(ghostState.state.players).toEqual([]);
+  expect(
+    (
+      await page.request.post("/api/action", {
+        headers: { Cookie: oldCookie },
+        data: {
+          revision: 0,
+          workspace: "sandbox",
+          action: "player.create",
+          payload: { name: "expired-abc", official: null, officialType: "ELO" },
+        },
+      })
+    ).status(),
+  ).toBe(410);
+  // A sandbox request with no sandbox cookie cannot write to real club data.
+  const primary = await (await real.get("/api/state")).json();
+  expect(
+    (
+      await real.post("/api/action", {
+        data: {
+          revision: primary.revision,
+          workspace: "sandbox",
+          action: "player.create",
+          payload: {
+            name: "wrong-workspace",
+            official: null,
+            officialType: "ELO",
+          },
+        },
+      })
+    ).status(),
+  ).toBe(409);
+  expect(await (await real.get("/api/backup")).json()).toEqual(before);
+  await real.dispose();
 });

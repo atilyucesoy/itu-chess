@@ -8,6 +8,7 @@ const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   env: {
     ...process.env,
     NODE_ENV: "test",
+    ENABLE_DEVELOPER_MODE: "1",
     DB_PATH: join(dir, "test.sqlite"),
     SUPABASE_URL: "",
     SUPABASE_SERVICE_ROLE_KEY: "",

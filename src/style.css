@@ -12,6 +12,51 @@
   left: 50%;
   transform: translate(-50%, -50%);
 }
+.developer-banner {
+  background: #f5edcf;
+  color: #63501e;
+  border-bottom: 1px solid #dcc886;
+  padding: 16px 43px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.developer-banner strong {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.developer-banner span {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.developer-banner .button {
+  color: #63501e;
+  background: #fff9e5;
+  border-color: #dcc886;
+}
+.developer-settings {
+  margin-bottom: 24px;
+  border-color: #dcc886;
+}
+@media (max-width: 950px) {
+  .developer-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px 22px;
+  }
+}
+@media (max-width: 700px) {
+  .developer-banner {
+    padding: 16px 17px;
+  }
+  .developer-banner .button-group {
+    flex-wrap: wrap;
+  }
+}
 :root {
   font-family: "DM Sans", sans-serif;
   color: #28362f;

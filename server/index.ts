@@ -14,9 +14,18 @@ import {
 } from "./auth.js";
 import { applyAction } from "./domain.js";
 import { toTrf, ENGINE_VERSION, enginePath } from "./engine.js";
-import type { Manager, State } from "../shared/types.js";
+import { emptyState, type Manager, type State } from "../shared/types.js";
+import {
+  developerModeEnabled,
+  SandboxRegistry,
+  sandboxToken,
+} from "./developer.js";
 const production = process.env.NODE_ENV === "production";
 const store = createStore();
+const developerAvailable = developerModeEnabled();
+const sandboxes = new SandboxRegistry();
+const cleanupTimer = setInterval(() => sandboxes.cleanup(), 60_000);
+cleanupTimer.unref();
 let secret = process.env.SESSION_SECRET;
 if (!secret) {
   if (production)
@@ -87,6 +96,50 @@ app.use("/api", (req, res, next) => {
 });
 const safeUser = (m: Manager | null) =>
   m ? { id: m.id, username: m.username, name: m.name, role: m.role } : null;
+async function context(req: express.Request) {
+  const live = await store.load();
+  const user = authenticate(
+    req.headers.cookie,
+    live.state.managers,
+    sessionSecret,
+  );
+  const token = sandboxToken(req.headers.cookie);
+  if (!token)
+    return { ...live, user, activeStore: store, workspace: "club" as const };
+  // A stale sandbox cookie NEVER falls back to real club records.
+  const memory =
+    developerAvailable && user?.role === "owner"
+      ? sandboxes.resolve(token, user.id)
+      : null;
+  if (!memory)
+    return {
+      revision: 0,
+      state: emptyState(),
+      user,
+      activeStore: null,
+      workspace: "expired" as const,
+    };
+  return {
+    ...(await memory.load()),
+    user,
+    activeStore: memory,
+    workspace: "sandbox" as const,
+  };
+}
+function clearSandbox(
+  req: express.Request,
+  res: express.Response,
+  ownerId?: string,
+) {
+  const token = sandboxToken(req.headers.cookie);
+  if (token && ownerId) sandboxes.drop(token, ownerId);
+  res.clearCookie("itu_sandbox", {
+    path: "/",
+    httpOnly: true,
+    sameSite: "strict",
+    secure: production,
+  });
+}
 function publicData(state: State) {
   return {
     players: state.players,
@@ -108,15 +161,97 @@ app.get("/api/health", (_req, res) =>
   }),
 );
 app.get("/api/state", async (req, res) => {
-  const { revision, state } = await store.load();
-  const user = authenticate(req.headers.cookie, state.managers, sessionSecret);
+  const { revision, state, user, workspace } = await context(req);
   res.json({
     revision,
     state: user
       ? { ...publicData(state), audit: state.audit, overrides: state.overrides }
       : publicData(state),
     user: safeUser(user),
+    workspace,
+    developerAvailable: developerAvailable && user?.role === "owner",
   });
+});
+app.post("/api/developer/enter", async (req, res) => {
+  if (!developerAvailable) {
+    res.status(404).json({ error: "Developer mode bu sunucuda kapalı." });
+    return;
+  }
+  const live = await store.load();
+  const user = authenticate(
+    req.headers.cookie,
+    live.state.managers,
+    sessionSecret,
+  );
+  if (user?.role !== "owner") {
+    res.status(403).json({ error: "Kulüp yöneticisi yetkisi gerekli." });
+    return;
+  }
+  if (req.body.confirm !== true) {
+    res.status(400).json({ error: "Deneme ortamı onayı gerekli." });
+    return;
+  }
+  clearSandbox(req, res, user.id);
+  const token = sandboxes.create(user.id, live.state.policy);
+  // Keep a session cookie after memory expiration: it identifies an expired
+  // sandbox instead of silently routing the browser back to production data.
+  res.cookie("itu_sandbox", token, {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: false,
+    path: "/",
+  });
+  res.json({ ok: true });
+});
+app.post("/api/developer/reset", async (req, res) => {
+  if (!developerAvailable) {
+    res.status(404).json({ error: "Developer mode kapalı." });
+    return;
+  }
+  const ctx = await context(req);
+  if (ctx.user?.role !== "owner") {
+    res.status(403).json({ error: "Yetkisiz." });
+    return;
+  }
+  if (
+    ctx.workspace !== "sandbox" ||
+    !ctx.activeStore ||
+    req.body.confirm !== true
+  ) {
+    res.status(400).json({ error: "Yalnız açık deneme alanı sıfırlanabilir." });
+    return;
+  }
+  if (req.body.revision !== ctx.revision) {
+    res
+      .status(409)
+      .json({ error: "Deneme kayıtları değişti; yenileyip tekrar deneyin." });
+    return;
+  }
+  const live = await store.load();
+  // A synchronous reset invalidates every earlier revision and drops all test data.
+  const token = sandboxToken(req.headers.cookie)!;
+  const memory = sandboxes.resolve(token, ctx.user.id);
+  if (!memory) {
+    res.status(410).json({ error: "Deneme oturumu sona erdi." });
+    return;
+  }
+  if (!memory.reset(live.state.policy, ctx.revision)) {
+    res
+      .status(409)
+      .json({ error: "Deneme kayıtları değişti; tekrar deneyin." });
+    return;
+  }
+  res.json({ ok: true });
+});
+app.post("/api/developer/exit", async (req, res) => {
+  const live = await store.load();
+  const user = authenticate(
+    req.headers.cookie,
+    live.state.managers,
+    sessionSecret,
+  );
+  clearSandbox(req, res, user?.id);
+  res.json({ ok: true });
 });
 app.post(
   "/api/login",
@@ -138,6 +273,7 @@ app.post(
       res.status(401).json({ error: "Kullanıcı adı veya şifre hatalı." });
       return;
     }
+    clearSandbox(req, res, manager.id);
     res.cookie("itu_session", tokenFor(manager, sessionSecret), {
       httpOnly: true,
       sameSite: "strict",
@@ -148,7 +284,14 @@ app.post(
     res.json({ user: safeUser(manager) });
   },
 );
-app.post("/api/logout", (_req, res) => {
+app.post("/api/logout", async (req, res) => {
+  const live = await store.load();
+  const user = authenticate(
+    req.headers.cookie,
+    live.state.managers,
+    sessionSecret,
+  );
+  clearSandbox(req, res, user?.id);
   res.clearCookie("itu_session", {
     path: "/",
     httpOnly: true,
@@ -161,26 +304,42 @@ app.post("/api/action", async (req, res) => {
   const input = z
     .object({
       revision: z.number().int().nonnegative(),
+      workspace: z.enum(["club", "sandbox"]).default("club"),
       action: z.string().max(80),
       payload: z.record(z.string(), z.unknown()),
     })
     .parse(req.body);
-  const { revision, state } = await store.load();
-  const user = authenticate(req.headers.cookie, state.managers, sessionSecret);
+  const { revision, state, user, activeStore, workspace } = await context(req);
   if (!user) {
     res.status(401).json({ error: "Yönetici girişi gerekli." });
     return;
   }
-  if (revision !== input.revision) {
+  if (!activeStore) {
     res
-      .status(409)
-      .json({
-        error:
-          "Başka bir yönetici değişiklik yaptı. Sayfa yenilendi; işlemi tekrar deneyin.",
-      });
+      .status(410)
+      .json({ error: "Deneme oturumu sona erdi. Kulüp kayıtlarına dönün." });
+    return;
+  }
+  if (input.workspace !== workspace) {
+    res.status(409).json({
+      error: "Çalışma alanı değişti. Sayfayı yenileyip işlemi tekrar deneyin.",
+    });
+    return;
+  }
+  if (revision !== input.revision) {
+    res.status(409).json({
+      error:
+        "Başka bir yönetici değişiklik yaptı. Sayfa yenilendi; işlemi tekrar deneyin.",
+    });
     return;
   }
   if (input.action.startsWith("manager.")) {
+    if (workspace !== "club") {
+      res
+        .status(403)
+        .json({ error: "Deneme alanında yönetici hesapları değiştirilemez." });
+      return;
+    }
     if (user.role !== "owner") {
       res.status(403).json({ error: "Kulüp yöneticisi yetkisi gerekli." });
       return;
@@ -233,31 +392,29 @@ app.post("/api/action", async (req, res) => {
     action: input.action,
   });
   state.audit = state.audit.slice(0, 2000);
-  if (!(await store.save(state, revision))) {
-    res
-      .status(409)
-      .json({
-        error: "Eşzamanlı değişiklik algılandı. Yenileyip tekrar deneyin.",
-      });
+  if (!(await activeStore.save(state, revision))) {
+    res.status(409).json({
+      error: "Eşzamanlı değişiklik algılandı. Yenileyip tekrar deneyin.",
+    });
     return;
   }
   res.json({ ok: true });
 });
 app.get("/api/managers", async (req, res) => {
-  const { state } = await store.load();
-  const user = authenticate(req.headers.cookie, state.managers, sessionSecret);
+  const { state, user, workspace } = await context(req);
   if (user?.role !== "owner") {
     res.status(403).json({ error: "Yetkisiz." });
+    return;
+  }
+  if (workspace !== "club") {
+    res.json([]);
     return;
   }
   res.json(state.managers.map(safeUser));
 });
 app.get("/api/backup", async (req, res) => {
-  const { revision, state } = await store.load();
-  if (
-    authenticate(req.headers.cookie, state.managers, sessionSecret)?.role !==
-    "owner"
-  ) {
+  const { revision, state, user, workspace } = await context(req);
+  if (user?.role !== "owner" || workspace !== "club") {
     res.status(403).json({ error: "Yetkisiz." });
     return;
   }
@@ -269,10 +426,13 @@ app.get("/api/backup", async (req, res) => {
     .json({ schemaVersion: 1, revision, state });
 });
 app.get("/api/tournaments/:id/trf", async (req, res) => {
-  const { state } = await store.load();
-  const user = authenticate(req.headers.cookie, state.managers, sessionSecret);
+  const { state, user, workspace } = await context(req);
   if (!user) {
     res.status(403).json({ error: "Yetkisiz." });
+    return;
+  }
+  if (workspace === "expired") {
+    res.status(410).json({ error: "Deneme oturumu sona erdi." });
     return;
   }
   const t = state.tournaments.find((t) => t.id === req.params.id);
@@ -297,14 +457,12 @@ app.use(
     _next: express.NextFunction,
   ) => {
     if (err instanceof ZodError) {
-      res
-        .status(400)
-        .json({
-          error: "Bilgileri kontrol edin.",
-          details: err.issues
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join(" · "),
-        });
+      res.status(400).json({
+        error: "Bilgileri kontrol edin.",
+        details: err.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join(" · "),
+      });
       return;
     }
     console.error(err.message);

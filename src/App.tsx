@@ -181,6 +181,10 @@ export default function App() {
   const [state, setState] = useState<PublicState>(empty);
   const [revision, setRevision] = useState(0);
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [workspace, setWorkspace] = useState<"club" | "sandbox" | "expired">(
+    "club",
+  );
+  const [developerAvailable, setDeveloperAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
@@ -209,6 +213,8 @@ export default function App() {
     setState(data.state);
     setRevision(data.revision);
     setUser(data.user);
+    setWorkspace(data.workspace ?? "club");
+    setDeveloperAvailable(data.developerAvailable === true);
     setLoading(false);
   }, []);
   useEffect(() => {
@@ -257,7 +263,7 @@ export default function App() {
       const response = await fetch("/api/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revision, action: name, payload }),
+        body: JSON.stringify({ revision, workspace, action: name, payload }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -275,6 +281,45 @@ export default function App() {
     } catch (e) {
       notify((e as Error).message, true);
       return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function developerAction(kind: "enter" | "reset" | "exit") {
+    if (busy) return;
+    if (
+      kind !== "enter" &&
+      !confirm(
+        kind === "reset"
+          ? "Deneme alanındaki TÜM oyuncular, turnuvalar, ratingler ve işlem kayıtları silinsin mi?"
+          : "Deneme verileri silinip gerçek kulüp kayıtlarına dönülsün mü?",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/developer/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, revision }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 409) await load();
+        throw new Error(data.error);
+      }
+      setModal(null);
+      await load();
+      go("home");
+      notify(
+        kind === "enter"
+          ? "Deneme ortamı açıldı. Gerçek kayıtlar etkilenmez."
+          : kind === "reset"
+            ? "Deneme verileri tamamen temizlendi."
+            : "Kulüp kayıtlarına dönüldü. Deneme verileri silindi.",
+      );
+    } catch (e) {
+      notify((e as Error).message, true);
     } finally {
       setBusy(false);
     }
@@ -498,6 +543,45 @@ export default function App() {
             )}
           </div>
         </header>
+        {workspace !== "club" && (
+          <div
+            className="developer-banner"
+            role="region"
+            aria-label="Deneme ortamı"
+          >
+            <div>
+              <strong>
+                {workspace === "expired"
+                  ? "Deneme oturumu sona erdi"
+                  : "DEVELOPER MODE · DENEME ORTAMI"}
+              </strong>
+              <span>
+                {workspace === "expired"
+                  ? "Deneme verileri korunmadı. Devam etmek için kulüp kayıtlarına dönün."
+                  : "Bu alandaki oyuncular, sonuçlar ve ratingler gerçek kulüp kayıtlarına yazılmaz."}
+              </span>
+            </div>
+            <div className="button-group">
+              {workspace === "sandbox" && (
+                <button
+                  className="button secondary small"
+                  disabled={busy}
+                  onClick={() => developerAction("reset")}
+                >
+                  <RotateCcw size={14} />
+                  Denemeyi sıfırla
+                </button>
+              )}
+              <button
+                className="button secondary small"
+                disabled={busy}
+                onClick={() => developerAction("exit")}
+              >
+                Kulüp kayıtlarına dön
+              </button>
+            </div>
+          </div>
+        )}
         <div className="content" aria-busy={busy || loading}>
           {loading ? (
             <div className="loading">
@@ -1014,7 +1098,7 @@ export default function App() {
                     {!championship(state, semester).length && (
                       <Empty
                         icon={<Trophy size={42} />}
-                        title="Yeni dönem, temiz bir sayfa"
+                        title="Bu dönemde henüz puan yok"
                       >
                         Dönem puanlarına dahil bir turnuva tamamlandığında
                         sıralama burada oluşur.
@@ -1088,6 +1172,9 @@ export default function App() {
                     user={user}
                     action={action}
                     revision={revision}
+                    developerAvailable={developerAvailable}
+                    sandbox={workspace !== "club"}
+                    onEnterSandbox={() => developerAction("enter")}
                   />
                 ) : (
                   <Empty
@@ -2190,7 +2277,7 @@ function ParticipantPicker({
     <div className="card">
       <div className="picker-heading">
         <div>
-          <h2>Bu hafta kimler oynuyor?</h2>
+          <h2>Katılımcılar</h2>
           <p className="muted">Kayıtlı oyuncuları seç, kadroyu kaydet.</p>
         </div>
         <span className="pill">{selected.size} seçili</span>
@@ -2263,7 +2350,7 @@ function ParticipantPicker({
       </div>
       {!players.length && (
         <Empty
-          title="Önce oyuncu ekleyelim"
+          title="Kayıtlı oyuncu yok"
           action={
             <a className="button secondary" href="#players">
               Oyunculara git
@@ -2450,22 +2537,28 @@ function SettingsPage({
   user,
   action,
   revision,
+  developerAvailable,
+  sandbox,
+  onEnterSandbox,
 }: {
   state: PublicState;
   user: SessionUser;
   action: Action;
   revision: number;
+  developerAvailable: boolean;
+  sandbox: boolean;
+  onEnterSandbox: () => void;
 }) {
   const [managers, setManagers] = useState<SessionUser[]>([]);
   const [saving, setSaving] = useState(false);
   const owner = user.role === "owner";
   useEffect(() => {
-    if (owner)
+    if (owner && !sandbox)
       fetch("/api/managers")
         .then((r) => (r.ok ? r.json() : []))
         .then(setManagers)
         .catch(() => {});
-  }, [owner, revision]);
+  }, [owner, revision, sandbox]);
   return (
     <>
       <div className="page-heading">
@@ -2474,6 +2567,20 @@ function SettingsPage({
           <p>Rating politikası, yönetici hesapları ve verilerin.</p>
         </div>
       </div>
+      {owner && developerAvailable && !sandbox && (
+        <section className="card padded developer-settings">
+          <h2>Developer mode</h2>
+          <p className="muted">
+            Boş ve ayrı bir deneme alanı açar. Deneme verileri yalnız sunucu
+            belleğinde tutulur; sıfırlama, çıkış veya sunucu yeniden
+            başlatıldığında silinir. Gerçek oyuncular, turnuvalar ve ratingler
+            değişmez.
+          </p>
+          <button className="button secondary" onClick={onEnterSandbox}>
+            Deneme ortamını aç
+          </button>
+        </section>
+      )}
       <div className="settings-grid">
         <section className="card padded">
           <h2>İTÜ Elo politikası</h2>
@@ -2587,17 +2694,22 @@ function SettingsPage({
         </section>
         <div className="settings-stack">
           <section className="card padded">
-            <h2>Veriler ve yedekleme</h2>
-            <p className="muted">Her turnuva sonrası yedek almanı öneririz.</p>
-            {owner && (
+            <h2>{sandbox ? "Deneme verileri" : "Veriler ve yedekleme"}</h2>
+            <p className="muted">
+              {sandbox
+                ? "Deneme alanı kalıcı veritabanına yazılmaz. Üstteki sıfırlama düğmesi tüm deneme verilerini temizler."
+                : "Her turnuva sonrası yedek almanı öneririz."}
+            </p>
+            {owner && !sandbox && (
               <a className="button secondary" href="/api/backup">
                 <Download size={17} />
                 Tam yedek indir
               </a>
             )}
             <p className="footnote">
-              Tam yedek yönetici şifre hashlerini de içerir; özel tut. Geri
-              yükleme sunucu bakım aracıyla yapılır.
+              {sandbox
+                ? "Deneme alanında tam yedek indirme kapalıdır. Kendi indirdiğiniz CSV/TRF dosyaları sıfırlamayla bilgisayarınızdan silinmez."
+                : "Tam yedek yönetici şifre hashlerini de içerir; özel tut. Geri yükleme sunucu bakım aracıyla yapılır."}
             </p>
             {owner && (
               <details className="advanced">
@@ -2632,7 +2744,7 @@ function SettingsPage({
               </details>
             )}
           </section>
-          {owner && (
+          {owner && !sandbox && (
             <section className="card padded">
               <h2>Turnuva yöneticileri</h2>
               {managers.map((m) => (
