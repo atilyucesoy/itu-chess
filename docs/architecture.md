@@ -53,7 +53,7 @@ Semester labels are centrally registered, with an explicit owner-controlled acti
 
 ## Presentation and projection
 
-The browser stores palette (brown/green) separately from light/dark mode. These preferences are local presentation state, not club-wide settings.
+Brown is the only palette. The browser stores the light/dark preference locally; it is not a club-wide setting. Pairing typography is centered, with moderately reduced sizes relative to the earlier projection-focused large table.
 
 A separate read-only hash route renders projected pairings without navigation or editing controls. It displays the same frozen entry ratings and the same round data as the tournament desk. Responsive capacity and pagination avoid hiding later boards when screen height or long names reduce available room. A standard 40-player field is browser-tested at 1920×1080 with all 20 boards visible. Native fullscreen is optional; the layout also fills the page without it. The default round selector follows the latest round as the shared 20-second polling refreshes data, while explicitly selected historical rounds remain fixed.
 
@@ -62,6 +62,10 @@ A separate read-only hash route renders projected pairings without navigation or
 The persistent store is one versioned JSON document. SQLite performs an atomic `UPDATE ... WHERE revision = ?`; Supabase uses an equivalent private Postgres RPC. Browser writes include the revision they were based on. A conflicting write is rejected, not silently merged or overwritten.
 
 This is a deliberate small-club trade-off: keeping event finalization, rating replay, points and audit metadata in one atomic document reduces partial-update cases. It also means reads load the whole document, and unrelated edits can conflict. A larger deployment would need normalized tables, finer-grained concurrency controls and migrations.
+
+The primary store now coalesces reads for up to five seconds, returning independent copies to each request. Successful writes immediately invalidate it. A read begun before invalidation cannot repopulate the newer cache generation. The underlying store's CAS is still used for all mutations. Conditional browser polling hashes the complete authorized response into an ETag; unchanged representations return 304 without a body. This reduces repeated database reads and network payloads, not the need to monitor provider quotas. Sandbox stores are not shared through this cache.
+
+Late entrants have an explicit first eligible round. Their missing pre-entry rounds are interpreted as colourless zero-point absences without inserting games into the original published round objects. Tournament pairing numbers are provisional and can be re-assigned on admission using frozen seed strengths, while stable player UUIDs preserve every recorded matchup. Player creation plus admission is a single revision-checked transaction; duplicates and arrivals after the final pairing fail without orphan player creation.
 
 Finalization cannot be repeated. Corrections to earlier rounds require explicitly undoing subsequent rounds; reopening older rated events is restricted when later rated events remain finalized. These constraints favor reproducible history over unrestricted editing.
 
@@ -79,4 +83,4 @@ Reset, exit, logout, expiration and server restart remove test state. Sandbox ac
 - Playwright exercises desktop/mobile tournament management, organizer permissions, edit conflicts and sandbox isolation.
 - GitHub Actions runs the test suite and production build on pushes and pull requests.
 - Hosted Supabase connectivity still requires deployment-time verification with the project owner's credentials; local tests do not imply that a remote deployment has been tested.
-- There is no live public deployment yet. Late entries after round one and changing the round count mid-event are intentionally outside the current release.
+- There is no live public deployment yet. Late entries are supported; changing the round count mid-event remains intentionally outside the current release. The Turkish deployment walkthrough is in `YAYINLAMA.md`.
