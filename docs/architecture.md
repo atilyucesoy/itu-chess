@@ -47,7 +47,15 @@ Tournament ranking and season points are different computations:
 1. A tournament ranks participants by score, Buchholz Cut-1, Buchholz, Sonneborn-Berger and a recorded random lot for any remaining complete ties.
 2. Semester standings sum the F1-style points from completed, included events. Ties use finishing-position countback; completely identical records share a season rank.
 
-The supported bye, forfeit and withdrawal cases have explicit tie-break adjustments rather than treating every unplayed round as an ordinary game. Live tie-break values are provisional. Tournaments independently opt into club rating calculations and semester points, which also supports unrated Chess960 club nights.
+The supported bye, forfeit and withdrawal cases have explicit tie-break adjustments rather than treating every unplayed round as an ordinary game. Live tie-break values are provisional. Standard tournaments independently opt into club rating calculations and semester points, so casual events can be excluded without introducing a variant selector.
+
+Semester labels are centrally registered, with an explicit owner-controlled active period. The header and new-event defaults use that active period; historical standings use an independent viewing selection. Rollover does not reassign old events, reset club ratings or alter past points. A one-time, idempotent migration preserves all legacy labels and records and adds only the missing registry metadata. Backup restoration uses the same normalization.
+
+## Presentation and projection
+
+The browser stores palette (brown/green) separately from light/dark mode. These preferences are local presentation state, not club-wide settings.
+
+A separate read-only hash route renders projected pairings without navigation or editing controls. It displays the same frozen entry ratings and the same round data as the tournament desk. Responsive capacity and pagination avoid hiding later boards when screen height or long names reduce available room. A standard 40-player field is browser-tested at 1920×1080 with all 20 boards visible. Native fullscreen is optional; the layout also fills the page without it. The default round selector follows the latest round as the shared 20-second polling refreshes data, while explicitly selected historical rounds remain fixed.
 
 ## Persistence and concurrent edits
 
@@ -59,7 +67,7 @@ Finalization cannot be repeated. Corrections to earlier rounds require explicitl
 
 ## Disposable developer workspaces
 
-Developer mode is opt-in and hard-disabled in production. An owner can open an empty in-memory workspace using the current rating policy. It copies no actual players or accounts.
+Developer mode is opt-in and hard-disabled in production. An owner can open an empty in-memory workspace using the current rating policy and semester configuration. It copies no actual players or accounts.
 
 The server validates both the workspace cookie and the workspace identifier on every mutation. A missing/expired sandbox must not redirect a stale test write to the actual club. Reset increments the sandbox revision; disposal invalidates its store so in-flight saves cannot resurrect deleted test state.
 

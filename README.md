@@ -8,7 +8,7 @@ A tournament-management web application built for Istanbul Technical University'
 
 ![Club overview](docs/screenshots/overview.png)
 
-Screenshots use fictional automated-test data, not real club records. [Standings](docs/screenshots/standings.png) · [Mobile layout](docs/screenshots/mobile-overview.png) · [Architecture and trade-offs](docs/architecture.md)
+Screenshots use fictional automated-test data, not real club records. [1080p projection / 40 players](docs/screenshots/projection.png) · [Standings](docs/screenshots/standings.png) · [Mobile layout](docs/screenshots/mobile-overview.png) · [Architecture and trade-offs](docs/architecture.md)
 
 ## Run locally
 
@@ -31,7 +31,7 @@ Local database: `data/club.sqlite`. Do not delete it or store it on an ephemeral
 
 `npm run dev` enables developer mode on the local server. Sign in as the owner, open **Kulüp ayarları → Developer mode → Deneme ortamını aç**. A persistent yellow banner identifies the test workspace. Add names such as `abc`, create a tournament, enter results and finalize normally.
 
-- The test workspace starts empty and copies **only the rating policy**, never actual players, tournaments or accounts.
+- The test workspace starts empty and copies **only rating policy and semester configuration**, never actual players, tournaments or accounts.
 - All test state lives in an isolated **in-memory store**, not the club's SQLite/Supabase database. It does not enter real rating history, points, audit records or backups.
 - **Denemeyi sıfırla** clears all test players, events, rating changes, corrections and audit entries. **Kulüp kayıtlarına dön** clears and discards the test workspace before returning to actual club data.
 - Test state is also discarded on logout, server restart or after four hours. An expired workspace never silently accepts mutations against actual club records. Explicit workspace checks and monotonic revisions reject stale requests.
@@ -44,13 +44,27 @@ Tabs in the same browser share the workspace cookie. Use a separate browser prof
 ## Weekly workflow
 
 1. Sign in, add people in **Oyuncular**, with optional FIDE standard Elo or UKD.
-2. Create an event. Defaults: **7 rounds**, **3+2**. Choose its semester and whether it contributes championship points and/or İTÜ Elo. Chess960 defaults both switches off, independently adjustable.
+2. Create a standard chess event. Defaults: **7 rounds**, **3+2**, and the club's active semester. Choose a registered semester and whether the event contributes championship points and/or İTÜ Elo. There is no variant/mode selection.
 3. Select existing players, or copy the most recent tournament's participant list. **Save the list** before generating the first round.
 4. Generate a round; enter wins, draws or forfeits. All results must be complete before pairing the next round.
 5. Between rounds, mark withdrawals/returns from **Oyuncular**. Withdrawn players receive explicit zero-point absences, not rating losses. Late registration after the first round is intentionally not supported in v0.1.
 6. After the planned final round, resolve any complete tie with a **recorded random lot**, then finalize. Finalization awards points and updates ratings once. It cannot be run twice.
 
 The total rounds can be changed **before starting**, not silently changed mid-event. First-round initial colour is randomly drawn once and stored. If the engine cannot create valid pairings, it reports failure; it never falls back to an improvised pairing algorithm. For very small fields, choose a feasible number of Swiss rounds before starting.
+
+### Projecting pairings
+
+From the event page choose **Tam ekran eşlendirmeler**, then **Tam ekran** to use the browser's native full-screen mode (or F11 if the browser refuses it). The projection route `#projection/<event-id>` is read-only and accessible without organizer login for actual club events. Navigation and result-entry controls are hidden.
+
+Names, both ratings, table numbers and piece colours are enlarged. A normal 40-player field fits as 20 boards in two columns on a 1920×1080 screen. Smaller screens and unusually long names use pagination instead of silently clipping players. Use the next/previous board controls to see every table. The default **Son tur (otomatik)** follows new pairings through the existing 20-second refresh; selecting a specific older round keeps that round visible. A manual refresh control is also available. Sandbox projections are clearly labeled and remain confined to the same browser session.
+
+### Appearance and semesters
+
+- Choose **Kahverengi / Yeşil** in the header or **Kulüp ayarları → Görünüm**. The light cream/brown palette is the default; the original green palette remains available. The light/dark toggle is independent. Both preferences are stored only in the current browser.
+- The owner manages **Kulüp ayarları → Dönemler**. Create a period, optionally activate it immediately, or select an existing period and use **Aktif dönemi kaydet**.
+- The header badge always shows the **active semester**. New events default to it. The semester standings page can independently display an older semester without changing the club's active one.
+- Semester rollover is deliberate, not a calendar-triggered reset. Old events and semester points are preserved, and İTÜ Elo carries forward. Existing event labels are imported unchanged into the registry when upgrading; the latest legacy event's period is the initial active choice. A new empty installation receives a one-time date-based suggestion, which the owner can change.
+- Existing backups remain restorable. Migration adds semester metadata only; it does not rewrite games, ratings, account data or historical event labels. New events only use registered semester names, avoiding spelling-based duplicate leaderboards.
 
 ### Ratings and seeding
 
@@ -77,7 +91,7 @@ Policy changes affect newly started events. **Geçmişi yeniden hesapla** explic
 - Win 1, draw ½, loss 0. Pairing-allocated bye 1, absent 0.
 - Tie-break order: **score → Buchholz Cut-1 → Buchholz → Sonneborn-Berger → recorded lot**. Implements the March 2026 FIDE C.07 unplayed-round adjustments for the supported result types. Live tie-breaks are provisional.
 - F1 schedule: **25–18–15–12–10–8–6–4–2–1**. Only completed events with `Dönem puanlarına dahil` count.
-- Semester standings are separate; İTÜ Elo continues across semesters. Semester labels are manually entered (reuse the same spelling).
+- Semester standings are separate; İTÜ Elo continues across semesters. Events select a period from the central registry.
 - Season ties use countback: number of firsts, then seconds, etc. If still equal, the season table shares the rank (`=`); alphabetical ordering is display-only.
 - Medal podiums, profiles, rating graphs, CSV exports, organizer TRF export and public shareable event links.
 
@@ -123,7 +137,7 @@ npx playwright install chromium
 npm run test:e2e        # isolated temporary database, never real club data
 ```
 
-Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts. Developer-mode tests cover owner-only access, production gating, memory disposal, reset races, expired-session handling and unchanged real club data. GitHub Actions runs the unit/integration tests and browser tests on pushes to `main` and pull requests.
+Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts. Developer-mode tests cover owner-only access, production gating, memory disposal, reset races, expired-session handling and unchanged real club data. Further tests cover safe semester migration/rollover, old backup compatibility, independent palette/dark-mode persistence and a 40-player projection at 1080p with live round updates, native fullscreen and smaller-screen pagination. GitHub Actions runs the unit/integration tests and browser tests on pushes to `main` and pull requests.
 
 ## Pairing rules and licensing
 
@@ -133,4 +147,4 @@ bbpPairings is downloaded from the pinned v6.0.0 release with SHA-256 verificati
 - [FIDE tie-breaks, March 2026](https://handbook.fide.com/chapter/TieBreakRegulations032026)
 - [bbpPairings v6.0.0](https://github.com/BieremaBoyzProgramming/bbpPairings/releases/tag/v6.0.0)
 
-Interface inspiration: restrained Lichess-style usability, with original club styling. No Lichess branding or assets. Google Fonts are optional; local system fonts remain usable when unavailable. `src/style.css` contains the theme and responsive layouts.
+Interface inspiration: restrained Lichess-style usability, with original club styling. No Lichess branding or assets. Google Fonts are optional; local system fonts remain usable when unavailable. `src/style.css` contains the original green layout; `src/enhancements.css` adds reversible palettes, larger pairings and the projection layout.
