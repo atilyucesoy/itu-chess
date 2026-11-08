@@ -7,7 +7,7 @@ import {
   type Tournament,
 } from "../shared/types.js";
 import { applyAction } from "../server/domain.js";
-import { toTrf } from "../server/engine.js";
+import { toTrf, verifyEngine } from "../server/engine.js";
 import { standings } from "../shared/standings.js";
 import { backupSchema } from "../server/backup-schema.js";
 import { hashPassword } from "../server/auth.js";
@@ -47,6 +47,9 @@ async function fixture(count = 8, rounds = 3) {
   );
   return { state, t };
 }
+test("engine startup check executes real pairings without any persistent store", async () => {
+  await verifyEngine();
+});
 async function generate(state: State, t: Tournament) {
   await applyAction(state, "round.generate", { tournamentId: t.id }, true);
 }

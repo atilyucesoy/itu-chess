@@ -82,5 +82,5 @@ Reset, exit, logout, expiration and server restart remove test state. Sandbox ac
 - Unit and integration tests invoke the actual engine for full even/odd seven-round tournaments and check rating/standings behavior.
 - Playwright exercises desktop/mobile tournament management, organizer permissions, edit conflicts and sandbox isolation.
 - GitHub Actions runs the test suite and production build on pushes and pull requests.
-- Hosted Supabase connectivity still requires deployment-time verification with the project owner's credentials; local tests do not imply that a remote deployment has been tested.
-- There is no live public deployment yet. Late entries are supported; changing the round count mid-event remains intentionally outside the current release. The Turkish deployment walkthrough is in `YAYINLAMA.md`.
+- The public deployment at `https://itu-chess.onrender.com` has been checked for Supabase-backed state reads, owner-account initialization, public/private endpoint boundaries and browser/mobile rendering. No fake tournament was written to the live database. The real engine also runs a transient two-player startup self-test before HTTP readiness is exposed.
+- An authenticated owner login still uses the deployment owner's chosen credentials; they are not exposed to anonymous checks. Late entries are supported; changing the round count mid-event remains intentionally outside the current release. The Turkish deployment walkthrough is in `YAYINLAMA.md`.

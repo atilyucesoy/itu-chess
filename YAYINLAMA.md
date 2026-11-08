@@ -1,6 +1,6 @@
 # Siteyi arkadaşlarınla paylaşmak için yayınlama
 
-Şu anda kod GitHub'da; `localhost:5173` yalnız senin bilgisayarında çalışır. Arkadaşlarına göndereceğin bağlantı, yayınlama tamamlandığında Render'ın vereceği **https://…onrender.com** adresi olacak. Bilgisayarını açık tutman gerekmeyecek.
+**Çalışan site: https://itu-chess.onrender.com** — arkadaşlarına bu bağlantıyı gönderebilirsin. `localhost:5173` yalnız senin bilgisayarında çalışır; online site için bilgisayarını açık tutman gerekmez. Aşağıdaki adımlar ilk kurulumun nasıl yapıldığını ve başka bir kurulumu/kurtarmayı anlatır.
 
 İki ücretsiz hizmet kullanıyoruz:
 

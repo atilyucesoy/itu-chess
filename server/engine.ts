@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  DEFAULT_POLICY,
   scoreOf,
   type Tournament,
   type Game,
@@ -13,6 +14,42 @@ const exec = promisify(execFile);
 export const ENGINE_VERSION = "bbpPairings 6.0.0 · FIDE Dutch 2026";
 export const enginePath = () =>
   process.env.BBP_PATH ?? resolve("bin/bbpPairings-v6.0.0/bbpPairings.exe");
+
+// Execute the real engine once at startup, not on every health request.
+// This temporary fixture never enters the club database, points, audit or backups.
+export async function verifyEngine() {
+  const t: Tournament = {
+    id: "engine-startup-check",
+    name: "Engine startup check",
+    date: "2026-01-01",
+    semester: "self-test",
+    roundsPlanned: 1,
+    timeControl: "self-test",
+    countsPoints: false,
+    countsRating: false,
+    status: "live",
+    policy: { ...DEFAULT_POLICY },
+    initialColor: "w",
+    finalizedAt: null,
+    ratingChanges: [],
+    lotOrder: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    rounds: [],
+    entries: [1, 2].map((number) => ({
+      playerId: `engine-${number}`,
+      name: `Player ${number}`,
+      official: null,
+      officialType: "ELO",
+      itu: null,
+      seed: 1500,
+      number,
+      withdrawn: false,
+    })),
+  };
+  const result = await pair(t);
+  if (result.games.length !== 1 || result.games[0].black === null)
+    throw new Error("Eşlendirme motoru başlangıç kontrolünü geçemedi.");
+}
 
 export function toTrf(t: Tournament, pairing = false) {
   const lines = [

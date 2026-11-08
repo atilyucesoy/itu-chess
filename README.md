@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/atilyucesoy/itu-chess/actions/workflows/ci.yml/badge.svg)](https://github.com/atilyucesoy/itu-chess/actions/workflows/ci.yml)
 
-A tournament-management web application built for Istanbul Technical University's chess club: reusable player profiles, FIDE Dutch Swiss pairing, a separate club Elo system, and semester Grand Prix standings. The UI is Turkish. The application is under development; a public live deployment is not yet available.
+A tournament-management web application built for Istanbul Technical University's chess club: reusable player profiles, FIDE Dutch Swiss pairing, a separate club Elo system, and semester Grand Prix standings. The UI is Turkish.
+
+**Live application: [itu-chess.onrender.com](https://itu-chess.onrender.com)** · Free hosting may take about a minute to wake after inactivity. The app starts with an empty real club database; screenshots below use fictional test fixtures.
 
 **Stack:** React, TypeScript, Vite, Express, SQLite / Supabase Postgres. Pairings use the external **bbpPairings 6.0.0** engine, not a simplified custom Swiss implementation.
 
@@ -109,7 +111,7 @@ Current-round results are editable. To change an earlier result, explicitly undo
 
 **Türkçe, ekran ekran kurulum ve turnuva gecesi kontrol listesi: [YAYINLAMA.md](YAYINLAMA.md).** İstersen yalnız ilk Supabase giriş adımını yapıp kalanını birlikte ilerleyebilirsin; hiçbir gizli anahtarı sohbete göndermek gerekmez.
 
-Nothing is deployed automatically. You need a free GitHub account, Render account and Supabase project. Organizer accounts inside the website do **not** require hosting-provider accounts.
+The public deployment uses Render Free and Supabase. To create your own deployment, you need a free GitHub account, Render account and Supabase project. Organizer accounts inside the website do **not** require hosting-provider accounts.
 
 1. Create a **Supabase Free** project. Run **`supabase/schema.sql`** in its SQL editor. Tables and RPC are private to the server's service-role key; anonymous/authenticated browser clients cannot read raw state or password hashes.
 2. Fork or clone [atilyucesoy/itu-chess](https://github.com/atilyucesoy/itu-chess). Keep `.env`, `data/`, `bin/`, `node_modules/` excluded from Git.
@@ -136,6 +138,7 @@ Sources: [Render Free](https://render.com/docs/free), [Supabase pricing](https:/
 - Audit retains the latest 2,000 action summaries (who/when/type), not a forensic history of every before/after value. Tournament snapshots and rating corrections retain their domain-specific history.
 - Data storage uses a single versioned JSON document, with atomic compare-and-swap in SQLite or a private Supabase RPC. Suitable for this small club, not intended as a large multi-tenant platform. Keep exports as independent backups.
 - A five-second, copy-isolated primary-store read cache coalesces spectator reads and is invalidated by successful CAS writes. Conditional polling uses ETags over the complete permission-filtered response, avoiding unchanged payload downloads without reusing private/sandbox representations across auth boundaries. The source CAS remains authoritative; caching does not turn stale writes into successful ones or bypass access checks.
+- Startup executes a real two-player pairing self-test before the server listens. Its temporary data never enters any persistent store. `/api/health` reports `engineReady: true` only after that check passes, rather than merely checking whether the binary file exists.
 
 ## Verification
 

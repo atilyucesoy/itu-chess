@@ -14,7 +14,7 @@ import {
   verifyPassword,
 } from "./auth.js";
 import { applyAction } from "./domain.js";
-import { toTrf, ENGINE_VERSION, enginePath } from "./engine.js";
+import { toTrf, ENGINE_VERSION, enginePath, verifyEngine } from "./engine.js";
 import { emptyState, type Manager, type State } from "../shared/types.js";
 import { migrateState } from "../shared/migrate.js";
 import {
@@ -65,6 +65,7 @@ if (
   !(await store.save(snapshot.state, snapshot.revision))
 )
   throw new Error("Concurrent setup detected; restart.");
+await verifyEngine();
 const app = express();
 if (production) app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -168,6 +169,7 @@ app.get("/api/health", (_req, res) =>
     ok: true,
     engine: ENGINE_VERSION,
     engineInstalled: existsSync(enginePath()),
+    engineReady: true,
     storage: process.env.SUPABASE_URL ? "supabase" : "sqlite",
   }),
 );
