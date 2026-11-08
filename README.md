@@ -6,6 +6,10 @@ A tournament-management web application built for Istanbul Technical University'
 
 **Stack:** React, TypeScript, Vite, Express, SQLite / Supabase Postgres. Pairings use the external **bbpPairings 6.0.0** engine, not a simplified custom Swiss implementation.
 
+![Club overview](docs/screenshots/overview.png)
+
+Screenshots use fictional automated-test data, not real club records. [Standings](docs/screenshots/standings.png) · [Mobile layout](docs/screenshots/mobile-overview.png) · [Architecture and trade-offs](docs/architecture.md)
+
 ## Run locally
 
 Linux x64, Node **22.13+**, npm, `tar` required. No paid services or API keys required locally.
