@@ -1,13 +1,8 @@
-export type Palette = "brown" | "green";
 export default function AppearanceSettings({
-  palette,
   dark,
-  onPalette,
   onDark,
 }: {
-  palette: Palette;
   dark: boolean;
-  onPalette: (p: Palette) => void;
   onDark: (dark: boolean) => void;
 }) {
   return (
@@ -16,25 +11,6 @@ export default function AppearanceSettings({
       <p className="muted">
         Bu tarayıcı için kaydedilir; diğer yöneticilerin görünümünü değiştirmez.
       </p>
-      <div className="palette-options" role="group" aria-label="Renk paleti">
-        {(
-          [
-            ["brown", "Kahverengi"],
-            ["green", "Yeşil"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            type="button"
-            key={value}
-            aria-pressed={palette === value}
-            className={`palette-option ${value}`}
-            onClick={() => onPalette(value)}
-          >
-            <i />
-            {label}
-          </button>
-        ))}
-      </div>
       <label className="check-row">
         <input
           type="checkbox"

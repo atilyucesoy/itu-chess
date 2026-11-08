@@ -3,6 +3,7 @@ import {
   useEffect,
   useCallback,
   useId,
+  useRef,
   cloneElement,
   isValidElement,
   type ReactNode,
@@ -54,10 +55,9 @@ import {
 } from "../shared/types";
 import { standings, championship } from "../shared/standings";
 import SemesterSettings from "./components/SemesterSettings";
-import AppearanceSettings, {
-  type Palette,
-} from "./components/AppearanceSettings";
+import AppearanceSettings from "./components/AppearanceSettings";
 import Projection from "./components/Projection";
+import LateEntryForm from "./components/LateEntryForm";
 
 type Page =
   | "home"
@@ -224,12 +224,11 @@ export default function App() {
   const [dark, setDark] = useState(
     localStorage.getItem("itu-theme") === "dark",
   );
-  const [palette, setPalette] = useState<Palette>(
-    localStorage.getItem("itu-palette") === "green" ? "green" : "brown",
-  );
   const [semesterSelection, setSemester] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const stateTag = useRef<string | null>(null);
+  const loadSequence = useRef(0);
   const [page, id] = route.split("/") as [Page, string | undefined];
   const semester =
     page === "championship" &&
@@ -242,10 +241,18 @@ export default function App() {
     [],
   );
   const load = useCallback(async () => {
-    const response = await fetch("/api/state");
+    const sequence = ++loadSequence.current;
+    const response = await fetch("/api/state", {
+      headers: stateTag.current ? { "If-None-Match": stateTag.current } : {},
+      cache: "no-store",
+    });
+    if (sequence !== loadSequence.current) return;
+    if (response.status === 304) return;
     if (!response.ok)
       throw new Error("Sunucuya ulaşılamıyor. Birazdan tekrar deneyin.");
     const data = await response.json();
+    if (sequence !== loadSequence.current) return;
+    stateTag.current = response.headers.get("ETag");
     setState(data.state);
     setRevision(data.revision);
     setUser(data.user);
@@ -276,15 +283,12 @@ export default function App() {
     localStorage.setItem("itu-theme", dark ? "dark" : "light");
   }, [dark]);
   useEffect(() => {
-    document.documentElement.dataset.palette = palette;
-    localStorage.setItem("itu-palette", palette);
+    document.documentElement.dataset.palette = "brown";
+    localStorage.removeItem("itu-palette");
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute(
-        "content",
-        palette === "green" ? "#173b33" : dark ? "#211d19" : "#624a35",
-      );
-  }, [palette, dark]);
+      ?.setAttribute("content", dark ? "#211d19" : "#624a35");
+  }, [dark]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 6500);
@@ -385,6 +389,33 @@ export default function App() {
               go("tournaments");
             }
           }}
+        />
+      ),
+    });
+  }
+  function lateEntry(t: Tournament) {
+    const add = async (payload: object) => {
+      if (
+        await action(
+          "tournament.lateEntry",
+          { tournamentId: t.id, ...payload },
+          `Geç katılım kaydedildi · ${t.rounds.length + 1}. turda başlar`,
+        )
+      )
+        setModal(null);
+    };
+    setModal({
+      title: "Geç katılım ekle",
+      content: (
+        <LateEntryForm
+          players={state.players.filter(
+            (p) => !t.entries.some((e) => e.playerId === p.id),
+          )}
+          nextRound={t.rounds.length + 1}
+          onAdd={(playerIds) => add({ playerIds })}
+          newPlayerForm={
+            <PlayerForm onSave={(newPlayer) => add({ newPlayer })} />
+          }
         />
       ),
     });
@@ -553,15 +584,6 @@ export default function App() {
             <strong>{title}</strong>
           </div>
           <div className="top-actions">
-            <select
-              className="palette-selector"
-              aria-label="Renk teması"
-              value={palette}
-              onChange={(e) => setPalette(e.target.value as Palette)}
-            >
-              <option value="brown">Kahverengi</option>
-              <option value="green">Yeşil</option>
-            </select>
             <span
               className="season-chip"
               title="Yeni turnuvalar için aktif dönem"
@@ -1198,6 +1220,7 @@ export default function App() {
                       action={action}
                       openPlayer={openPlayer}
                       notify={notify}
+                      onLateEntry={() => lateEntry(t)}
                       onEdit={() =>
                         setModal({
                           title: "Turnuva ayarları",
@@ -1230,12 +1253,7 @@ export default function App() {
                 (user ? (
                   <SettingsPage
                     appearance={
-                      <AppearanceSettings
-                        palette={palette}
-                        dark={dark}
-                        onPalette={setPalette}
-                        onDark={setDark}
-                      />
+                      <AppearanceSettings dark={dark} onDark={setDark} />
                     }
                     state={state}
                     user={user}
@@ -1621,6 +1639,7 @@ function TournamentDesk({
   action,
   openPlayer,
   notify,
+  onLateEntry,
   onEdit,
 }: {
   t: Tournament;
@@ -1630,6 +1649,7 @@ function TournamentDesk({
   action: Action;
   openPlayer: (id: string) => void;
   notify: (s: string, e?: boolean) => void;
+  onLateEntry: () => void;
   onEdit: () => void;
 }) {
   const [tab, setTab] = useState(
@@ -1679,6 +1699,16 @@ function TournamentDesk({
           </div>
         </div>
         <div className="button-group">
+          {user && t.status === "live" && t.rounds.length < t.roundsPlanned && (
+            <button
+              className="button secondary small"
+              disabled={busy}
+              onClick={onLateEntry}
+            >
+              <Plus size={16} />
+              Geç katılım ekle
+            </button>
+          )}
           {!!t.rounds.length && (
             <a className="button secondary small" href={`#projection/${t.id}`}>
               <Maximize size={16} />
@@ -2100,7 +2130,7 @@ function TournamentDesk({
           <p className="footnote">
             Sıralama: Puan → BH-C1 → BH → SB → kayıtlı kura. Tam eşitliklerde
             “=” gösterilir. Canlı tie-break değerleri geçicidir. Ratingler
-            turnuva başlangıcındaki değerlerdir.
+            katılım sırasında kaydedilen değerlerdir.
           </p>
         </>
       )}
@@ -2127,6 +2157,7 @@ function TournamentDesk({
                   <th>Oyuncu</th>
                   <th>İTÜ Elo / Resmî</th>
                   <th>Eşlendirme ratingi</th>
+                  <th>Katılım</th>
                   <th>Durum</th>
                   {user && t.status === "live" && <th />}
                 </tr>
@@ -2151,9 +2182,14 @@ function TournamentDesk({
                       />
                     </td>
                     <td>{e.seed}</td>
+                    <td>{e.joinedRound ?? 1}. turdan itibaren</td>
                     <td>
                       <span className="pill">
-                        {e.withdrawn ? "Çekildi" : "Aktif"}
+                        {e.withdrawn
+                          ? "Çekildi"
+                          : (e.joinedRound ?? 1) > t.rounds.length
+                            ? `${e.joinedRound}. turu bekliyor`
+                            : "Aktif"}
                       </span>
                     </td>
                     {user && t.status === "live" && (
@@ -2197,6 +2233,11 @@ function TournamentDesk({
               <dd>{t.roundsPlanned} (başlangıçta sabit)</dd>
               <dt>Skor</dt>
               <dd>Galibiyet 1 · Beraberlik ½ · Mağlubiyet 0</dd>
+              <dt>Geç katılım</dt>
+              <dd>
+                Sonraki eşlendirilmemiş tur · kaçırılan turlar 0 puan, rating
+                dışı
+              </dd>
               <dt>Dönem puanları</dt>
               <dd>{t.countsPoints ? "Dahil" : "Hariç"}</dd>
               <dt>İTÜ Elo</dt>
@@ -2926,6 +2967,7 @@ function auditLabel(action: string) {
         "player.update": "Oyuncu düzenlendi",
         "tournament.create": "Turnuva oluşturuldu",
         "tournament.entries": "Katılımcılar kaydedildi",
+        "tournament.lateEntry": "Geç katılım eklendi",
         "round.generate": "Tur eşlendirildi",
         "round.result": "Maç sonucu kaydedildi",
         "tournament.finalize": "Turnuva tamamlandı",

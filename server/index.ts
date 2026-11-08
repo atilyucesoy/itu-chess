@@ -1,11 +1,12 @@
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z, ZodError } from "zod";
 import { createStore } from "./store.js";
+import { cachedStore } from "./cached-store.js";
 import {
   authenticate,
   hashPassword,
@@ -22,7 +23,7 @@ import {
   sandboxToken,
 } from "./developer.js";
 const production = process.env.NODE_ENV === "production";
-const store = createStore();
+const store = cachedStore(createStore());
 const developerAvailable = developerModeEnabled();
 const sandboxes = new SandboxRegistry();
 const cleanupTimer = setInterval(() => sandboxes.cleanup(), 60_000);
@@ -172,7 +173,7 @@ app.get("/api/health", (_req, res) =>
 );
 app.get("/api/state", async (req, res) => {
   const { revision, state, user, workspace } = await context(req);
-  res.json({
+  const body = JSON.stringify({
     revision,
     state: user
       ? { ...publicData(state), audit: state.audit, overrides: state.overrides }
@@ -181,6 +182,16 @@ app.get("/api/state", async (req, res) => {
     workspace,
     developerAvailable: developerAvailable && user?.role === "owner",
   });
+  // Hash the complete, permission-filtered response: anonymous, authenticated,
+  // sandbox and expired-workspace representations cannot share a stale tag.
+  const tag = `"${createHash("sha256").update(body).digest("hex")}"`;
+  res.setHeader("ETag", tag);
+  res.vary("Cookie");
+  if (req.get("if-none-match") === tag) {
+    res.status(304).end();
+    return;
+  }
+  res.type("application/json").send(body);
 });
 app.post("/api/developer/enter", async (req, res) => {
   if (!developerAvailable) {

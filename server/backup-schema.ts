@@ -69,6 +69,7 @@ export const backupSchema = z
               seed: z.number().int().min(100).max(3500),
               number: z.number().int().nonnegative(),
               withdrawn: z.boolean(),
+              joinedRound: z.number().int().min(1).max(15).optional(),
             }),
           ),
           rounds: z.array(
@@ -129,6 +130,8 @@ export const backupSchema = z
     const ids = new Set(s.players.map((p) => p.id));
     for (const t of s.tournaments) {
       const entries = new Set(t.entries.map((e) => e.playerId));
+      if (t.entries.some((e) => (e.joinedRound ?? 1) > t.roundsPlanned))
+        ctx.addIssue({ code: "custom", message: "Invalid late-entry round" });
       if (
         entries.size !== t.entries.length ||
         t.entries.some((e) => !ids.has(e.playerId))

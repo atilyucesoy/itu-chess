@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
 
-test("semester administration, archived selection and independently persisted palette/mode", async ({
+test("semester administration, archived selection and brown-only light/dark persistence", async ({
   page,
 }) => {
+  await page.addInitScript(() => localStorage.setItem("itu-palette", "green"));
   await page.request.post("/api/login", {
     data: { username: "testowner", password: "test-password-12345" },
   });
@@ -17,14 +18,18 @@ test("semester administration, archived selection and independently persisted pa
   const after = await (await page.request.get("/api/state")).json();
   expect(after.state.tournaments).toEqual(before.state.tournaments);
   expect(after.state.players).toEqual(before.state.players);
-  await page.getByRole("button", { name: "Yeşil", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "green");
+  await expect(page.getByLabel("Renk teması")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Yeşil", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "brown");
   await page.getByRole("button", { name: "Koyu tema" }).click();
   await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "green");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("button", { name: "Kahverengi", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-palette", "brown");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(
+    await page.evaluate(() => localStorage.getItem("itu-palette")),
+  ).toBeNull();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: "Açık tema" }).click();
   await page.goto("/#championship");
@@ -105,7 +110,21 @@ test("40-player projection fits 1080p, is read-only for spectators and follows t
       .locator(".projection-name")
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-  ).toBeGreaterThanOrEqual(24);
+  ).toBeGreaterThanOrEqual(21);
+  expect(
+    await page
+      .locator(".projection-name")
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBeLessThan(24);
+  await expect(page.locator(".projection-player").first()).toHaveCSS(
+    "text-align",
+    "center",
+  );
+  await expect(page.locator(".projection-column-head").first()).toHaveCSS(
+    "text-align",
+    "center",
+  );
   expect(
     await page.evaluate(
       () =>

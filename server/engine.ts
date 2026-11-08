@@ -38,6 +38,7 @@ export function toTrf(t: Tournament, pairing = false) {
         const g = r.games.find(
           (g) => g.white === e.playerId || g.black === e.playerId,
         );
+        if (!g && r.number < (e.joinedRound ?? 1)) return "  0000 - Z";
         if (!g?.result) throw new Error("TRF için tüm sonuçlar girilmeli.");
         const white = g.white === e.playerId;
         score += scoreOf(g.result, white);
@@ -59,7 +60,11 @@ export function toTrf(t: Tournament, pairing = false) {
     put(80, score.toFixed(1).padStart(4));
     put(84, String(e.number).padStart(5));
     lines.push(
-      line.join("") + history + (pairing && e.withdrawn ? "  0000 - Z" : ""),
+      line.join("") +
+        history +
+        (pairing && (e.withdrawn || (e.joinedRound ?? 1) > t.rounds.length + 1)
+          ? "  0000 - Z"
+          : ""),
     );
   }
   return lines.join("\n") + "\n";
@@ -90,7 +95,11 @@ export async function pair(
       if (!white || (b !== 0 && !black))
         throw new Error("Motor bilinmeyen oyuncu döndürdü.");
       for (const e of [white, black].filter(Boolean) as Entry[]) {
-        if (seen.has(e.playerId) || e.withdrawn)
+        if (
+          seen.has(e.playerId) ||
+          e.withdrawn ||
+          (e.joinedRound ?? 1) > t.rounds.length + 1
+        )
           throw new Error("Geçersiz eşlendirme: çift/çekilen oyuncu.");
         seen.add(e.playerId);
       }
@@ -101,9 +110,16 @@ export async function pair(
         result: black ? null : "bye",
       };
     });
-    if (seen.size !== t.entries.filter((e) => !e.withdrawn).length)
+    if (
+      seen.size !==
+      t.entries.filter(
+        (e) => !e.withdrawn && (e.joinedRound ?? 1) <= t.rounds.length + 1,
+      ).length
+    )
       throw new Error("Motor bazı oyuncuları eşlendirmedi.");
-    for (const e of t.entries.filter((e) => e.withdrawn))
+    for (const e of t.entries.filter(
+      (e) => e.withdrawn || (e.joinedRound ?? 1) > t.rounds.length + 1,
+    ))
       games.push({
         board: 0,
         white: e.playerId,

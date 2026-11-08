@@ -9,6 +9,17 @@ import {
 import { standings } from "../shared/standings.js";
 import { rebuildRatings } from "../shared/ratings.js";
 import { pair } from "./engine.js";
+function seedOrder(t: Tournament) {
+  t.entries.sort(
+    (a, b) =>
+      b.seed - a.seed ||
+      a.name.localeCompare(b.name, "tr") ||
+      a.playerId.localeCompare(b.playerId),
+  );
+  t.entries.forEach((e, i) => {
+    e.number = i + 1;
+  });
+}
 const text = z.string().trim().min(1).max(120);
 const rating = z.number().int().min(100).max(3500);
 export const policySchema = z.object({
@@ -184,6 +195,84 @@ export async function applyAction(
   }
   const t = state.tournaments.find((t) => t.id === p.tournamentId);
   requireThat(t, "Turnuva bulunamadı.");
+  if (action === "tournament.lateEntry") {
+    requireThat(
+      t.status === "live",
+      "Geç katılım yalnız devam eden turnuvaya eklenebilir.",
+    );
+    requireThat(
+      t.rounds.length < t.roundsPlanned,
+      "Son tur eşlendirildi; katılınabilecek tur kalmadı.",
+    );
+    const input = z
+      .object({
+        playerIds: z.array(z.string()).max(200).default([]),
+        newPlayer: playerSchema.optional(),
+      })
+      .parse(p);
+    requireThat(
+      input.playerIds.length > 0 || input.newPlayer,
+      "En az bir oyuncu seçin veya yeni oyuncu ekleyin.",
+    );
+    requireThat(
+      new Set(input.playerIds).size === input.playerIds.length,
+      "Aynı oyuncu iki kez eklenemez.",
+    );
+    requireThat(
+      t.entries.length + input.playerIds.length + (input.newPlayer ? 1 : 0) <=
+        200,
+      "Turnuva en fazla 200 oyuncu içerebilir.",
+    );
+    const players = input.playerIds.map((id) => {
+      const player = state.players.find((p) => p.id === id);
+      requireThat(player, "Oyuncu bulunamadı.");
+      requireThat(
+        !t.entries.some((e) => e.playerId === id),
+        "Seçilen oyuncu zaten bu turnuvada kayıtlı.",
+      );
+      return player;
+    });
+    // Validate everything before mutating either registry. Creating a new player
+    // and admitting them is one revision-checked transaction.
+    if (input.newPlayer) {
+      requireThat(
+        !state.players.some(
+          (p) =>
+            p.name.toLocaleLowerCase("tr") ===
+            input.newPlayer!.name.toLocaleLowerCase("tr"),
+        ),
+        "Bu isim zaten kayıtlı; kayıtlı oyunculardan seçin.",
+      );
+      const player = {
+        ...input.newPlayer,
+        id: randomUUID(),
+        itu: null,
+        games: 0,
+        createdAt: new Date().toISOString(),
+      };
+      players.push(player);
+      state.players.push(player);
+    }
+    const joinedRound = t.rounds.length + 1;
+    for (const player of players)
+      t.entries.push({
+        playerId: player.id,
+        name: player.name,
+        official: player.official,
+        officialType: player.officialType,
+        itu: player.itu,
+        seed: effectiveRating(player, t.policy.reference),
+        number: 0,
+        withdrawn: false,
+        joinedRound,
+      });
+    // FIDE C.04.2 2.4–2.5: appropriate provisional TPNs for late entries.
+    // Games reference stable player UUIDs; published boards, colours, results and
+    // saved original TRFs are never rewritten when the TPN order changes.
+    seedOrder(t);
+    t.lotOrder = [];
+    return;
+  }
   if (action === "tournament.update") {
     requireThat(
       t.status === "draft",
@@ -217,6 +306,7 @@ export async function applyAction(
         seed: effectiveRating(player, state.policy.reference),
         number: 0,
         withdrawn: false,
+        joinedRound: 1,
       };
     });
     return;
@@ -252,19 +342,13 @@ export async function applyAction(
           seed: effectiveRating(player, t.policy.reference),
         });
       }
-      t.entries.sort(
-        (a, b) =>
-          b.seed - a.seed ||
-          a.name.localeCompare(b.name, "tr") ||
-          a.playerId.localeCompare(b.playerId),
-      );
-      t.entries.forEach((e, i) => {
-        e.number = i + 1;
-      });
+      seedOrder(t);
       t.status = "live";
     }
     requireThat(
-      t.entries.filter((x) => !x.withdrawn).length >= 2,
+      t.entries.filter(
+        (x) => !x.withdrawn && (x.joinedRound ?? 1) <= t.rounds.length + 1,
+      ).length >= 2,
       "En az iki aktif oyuncu gerekli.",
     );
     const pairing = await pair(t);
@@ -301,6 +385,10 @@ export async function applyAction(
     );
     t.rounds.pop();
     t.lotOrder = [];
+    t.entries.forEach((e) => {
+      if (e.joinedRound)
+        e.joinedRound = Math.min(e.joinedRound, t.rounds.length + 1);
+    });
     if (!t.rounds.length) {
       t.status = "draft";
       t.entries.forEach((e) => {

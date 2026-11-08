@@ -63,38 +63,13 @@
   .button:not(.secondary):not(.cream):not(.danger):hover:not(:disabled) {
   background: #674728;
 }
-.palette-selector {
-  font-size: 11px;
-  padding: 7px 9px;
+.late-player-list {
+  max-height: 260px;
+  overflow: auto;
 }
-.palette-options {
-  display: flex;
+.tournament-heading > .button-group {
   flex-wrap: wrap;
-  gap: 12px;
-  margin: 18px 0;
-}
-.palette-option {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 12px 17px;
-  font-size: 12px;
-}
-.palette-option[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.palette-option i {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: linear-gradient(45deg, #b58863 50%, #f0d9b5 50%);
-}
-.palette-option.green i {
-  background: linear-gradient(45deg, #173b33 50%, #94b99a 50%);
+  max-width: 100%;
 }
 .semester-settings .field {
   margin-top: 20px;
@@ -220,10 +195,11 @@
 }
 .projection-player {
   min-width: 0;
+  text-align: center;
 }
 .projection-name {
   display: block;
-  font-size: clamp(19px, 1.25vw, 26px);
+  font-size: clamp(18px, 1.15vw, 23px);
   font-weight: 700;
   line-height: 1.04;
   overflow-wrap: anywhere;
@@ -233,12 +209,13 @@
   gap: 10px;
   flex-wrap: wrap;
   align-items: baseline;
+  justify-content: center;
   margin-top: 2px;
   font-size: 18px;
   line-height: 1;
 }
 .projection-ratings b {
-  font-size: 20px;
+  font-size: 18px;
   color: var(--text);
 }
 .projection-ratings small {
@@ -247,7 +224,7 @@
   color: var(--muted);
 }
 .projection-ratings > span {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--muted);
 }
 .projection-result {
@@ -384,6 +361,24 @@
   padding: 15px 20px;
   font-weight: 600;
 }
+.pairings-table th,
+.pairings-table td {
+  text-align: center;
+}
+.pairings-table .board-number {
+  margin-inline: auto;
+}
+.projection-column-head {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 66px minmax(0, 1fr);
+  column-gap: 12px;
+  padding-inline: 12px;
+  text-align: center;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
 .pairings-table th:first-child {
   width: 80px;
 }
@@ -394,7 +389,10 @@
   background: var(--hover);
 }
 .pairings-table .player-name {
-  font-size: 20px;
+  font-size: 17px;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
   font-weight: 700;
   line-height: 1.35;
   white-space: normal;
@@ -402,15 +400,16 @@
 }
 .pairings-table .ratings {
   flex-wrap: wrap;
+  justify-content: center;
   margin-top: 8px;
   gap: 10px;
   line-height: 1.4;
 }
 .pairings-table .ratings > strong {
-  font-size: 17px;
+  font-size: 14px;
 }
 .pairings-table .ratings > span {
-  font-size: 15px;
+  font-size: 13px;
 }
 .pairings-table .ratings small {
   font-size: 11px;
@@ -439,12 +438,14 @@
 .pairings-table .bye-label small {
   font-size: 12px;
 }
-@media (max-width: 700px) {
-  .palette-selector {
-    max-width: 88px;
-    font-size: 10px;
-    padding: 7px 4px;
+@media (max-width: 1100px) {
+  .projection-column-head {
+    grid-template-columns: 32px minmax(0, 1fr) 55px minmax(0, 1fr);
+    column-gap: 8px;
+    padding-inline: 9px;
   }
+}
+@media (max-width: 700px) {
   .top-actions {
     gap: 3px;
   }
@@ -462,14 +463,14 @@
     width: 79px;
   }
   .pairings-table .player-name {
-    font-size: 15px;
+    font-size: 14px;
     max-width: none;
   }
   .pairings-table .ratings {
     gap: 3px 6px;
   }
   .pairings-table .ratings > strong {
-    font-size: 14px;
+    font-size: 13px;
   }
   .pairings-table .ratings > span {
     font-size: 12px;
@@ -498,5 +499,11 @@
   }
   .detail-toolbar {
     flex-wrap: wrap;
+  }
+  .projection-column-head {
+    grid-template-columns: 24px minmax(0, 1fr) 43px minmax(0, 1fr);
+    column-gap: 7px;
+    padding-inline: 8px;
+    font-size: 10px;
   }
 }

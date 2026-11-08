@@ -160,12 +160,7 @@ export default function Projection({
         </p>
       )}
       <div className="projection-legend">
-        <span>
-          <i className="piece-dot white-piece" />
-          Beyaz <span className="muted">solda</span> ·{" "}
-          <i className="piece-dot black-piece" />
-          Siyah <span className="muted">sağda</span>
-        </span>
+        <span>İTÜ Elo · Resmî Elo/UKD</span>
         <select
           aria-label="Projeksiyon turu"
           value={selection}
@@ -189,9 +184,21 @@ export default function Projection({
               className="projection-column"
               key={i}
               style={{
-                gridTemplateRows: `repeat(${Math.max(1, half)}, minmax(0, 1fr))`,
+                gridTemplateRows: `22px repeat(${Math.max(1, half)}, minmax(0, 1fr))`,
               }}
             >
+              <div className="projection-column-head">
+                <span>Masa</span>
+                <span>
+                  <i className="piece-dot white-piece" />
+                  Beyaz
+                </span>
+                <span>Sonuç</span>
+                <span>
+                  <i className="piece-dot black-piece" />
+                  Siyah
+                </span>
+              </div>
               {group.map((g) => (
                 <article
                   className="projection-game"

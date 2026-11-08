@@ -33,6 +33,8 @@ export interface Entry {
   seed: number;
   number: number;
   withdrawn: boolean;
+  // First round this participant may be paired in; absent on legacy entries = 1.
+  joinedRound?: number;
 }
 export interface Game {
   board: number;

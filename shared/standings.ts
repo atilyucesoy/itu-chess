@@ -16,6 +16,13 @@ export function standings(t: Tournament): Standing[] {
         const g = r.games.find(
           (g) => g.white === e.playerId || g.black === e.playerId,
         );
+        if (!g && r.number < (e.joinedRound ?? 1))
+          return {
+            opponent: null as string | null,
+            score: 0,
+            kind: "absent",
+            vur: true,
+          };
         if (!g || !g.result)
           return {
             opponent: null as string | null,
