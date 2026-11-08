@@ -6,6 +6,13 @@ import {
   type State,
 } from "../shared/types.js";
 import type { Store } from "./store.js";
+type Periods = Pick<State, "semesters" | "activeSemester">;
+function periodConfig(config: Periods) {
+  return {
+    semesters: [...config.semesters],
+    activeSemester: config.activeSemester,
+  };
+}
 
 export function developerModeEnabled(env: NodeJS.ProcessEnv = process.env) {
   return env.NODE_ENV !== "production" && env.ENABLE_DEVELOPER_MODE === "1";
@@ -17,8 +24,12 @@ export class MemorySandboxStore implements Store {
   private state: State;
   private revision = 0;
   private closed = false;
-  constructor(policy: Policy) {
-    this.state = { ...emptyState(), policy: structuredClone(policy) };
+  constructor(policy: Policy, periods?: Periods) {
+    this.state = {
+      ...emptyState(),
+      ...(periods ? periodConfig(periods) : {}),
+      policy: structuredClone(policy),
+    };
   }
   async load(): Promise<Snapshot> {
     return { revision: this.revision, state: structuredClone(this.state) };
@@ -29,10 +40,14 @@ export class MemorySandboxStore implements Store {
     this.revision++;
     return true;
   }
-  reset(policy: Policy, expected?: number) {
+  reset(policy: Policy, expected?: number, periods?: Periods) {
     if (this.closed || (expected !== undefined && expected !== this.revision))
       return false;
-    this.state = { ...emptyState(), policy: structuredClone(policy) };
+    this.state = {
+      ...emptyState(),
+      ...(periods ? periodConfig(periods) : {}),
+      policy: structuredClone(policy),
+    };
     this.revision++;
     return true;
   }
@@ -51,14 +66,14 @@ export class SandboxRegistry {
     private now: () => number = Date.now,
     private ttl = 4 * 60 * 60_000,
   ) {}
-  create(ownerId: string, policy: Policy) {
+  create(ownerId: string, policy: Policy, periods?: Periods) {
     this.cleanup();
     if (this.sessions.size >= 20)
       throw new Error(
         "Çok fazla deneme oturumu açık. Kullanmadığınız oturumlardan çıkın.",
       );
     const token = randomBytes(32).toString("hex");
-    const store = new MemorySandboxStore(policy);
+    const store = new MemorySandboxStore(policy, periods);
     this.sessions.set(token, {
       ownerId,
       expires: this.now() + this.ttl,

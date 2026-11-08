@@ -60,7 +60,8 @@ export interface Tournament {
   semester: string;
   roundsPlanned: number;
   timeControl: string;
-  variant: "standard" | "chess960";
+  // Retained only for backwards-compatible historical backups.
+  variant?: string;
   countsPoints: boolean;
   countsRating: boolean;
   status: "draft" | "live" | "finished";
@@ -101,6 +102,8 @@ export interface Override {
   reason: string;
 }
 export interface PublicState {
+  semesters: string[];
+  activeSemester: string;
   players: Player[];
   tournaments: Tournament[];
   policy: Policy;
@@ -128,7 +131,10 @@ export interface SessionUser {
   role: "owner" | "organizer";
 }
 export function emptyState(): State {
+  const semester = suggestedSemester();
   return {
+    semesters: [semester],
+    activeSemester: semester,
     players: [],
     tournaments: [],
     policy: { ...DEFAULT_POLICY },
@@ -136,6 +142,13 @@ export function emptyState(): State {
     audit: [],
     managers: [],
   };
+}
+// One-time suggestion for a fresh installation, not an automatic rollover rule.
+export function suggestedSemester(now = new Date()) {
+  const year = now.getFullYear();
+  return now.getMonth() >= 7
+    ? `${year}–${year + 1} Güz`
+    : `${year - 1}–${year} Bahar`;
 }
 export function effectiveRating(
   p: Pick<Player, "itu" | "official">,

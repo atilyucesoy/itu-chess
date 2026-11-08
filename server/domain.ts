@@ -26,10 +26,10 @@ const playerSchema = z.object({
 const tournamentSchema = z.object({
   name: text,
   date: z.iso.date(),
-  semester: text,
+  semester: text.optional(),
   roundsPlanned: z.number().int().min(1).max(15),
   timeControl: text,
-  variant: z.enum(["standard", "chess960"]),
+  variant: z.literal("standard").default("standard"),
   countsPoints: z.boolean(),
   countsRating: z.boolean(),
 });
@@ -65,6 +65,28 @@ export async function applyAction(
   owner: boolean,
 ) {
   const p = payload as Record<string, unknown>;
+  if (action === "semester.create") {
+    requireThat(owner, "Dönemleri yalnız kulüp yöneticisi oluşturabilir.");
+    const input = z
+      .object({ name: text, makeActive: z.boolean().default(false) })
+      .parse(p);
+    requireThat(
+      !state.semesters.some(
+        (s) => s.toLocaleLowerCase("tr") === input.name.toLocaleLowerCase("tr"),
+      ),
+      "Bu dönem zaten kayıtlı.",
+    );
+    state.semesters.push(input.name);
+    if (input.makeActive) state.activeSemester = input.name;
+    return;
+  }
+  if (action === "semester.activate") {
+    requireThat(owner, "Aktif dönemi yalnız kulüp yöneticisi değiştirebilir.");
+    const name = text.parse(p.name);
+    requireThat(state.semesters.includes(name), "Dönem bulunamadı.");
+    state.activeSemester = name;
+    return;
+  }
   if (action === "player.create" || action === "player.update") {
     const input = playerSchema.parse(p);
     if (action === "player.create") {
@@ -139,8 +161,14 @@ export async function applyAction(
   }
   if (action === "tournament.create") {
     const input = tournamentSchema.parse(p);
+    const semester = input.semester ?? state.activeSemester;
+    requireThat(
+      state.semesters.includes(semester),
+      "Önce bu dönemi Kulüp ayarları'ndan oluşturun.",
+    );
     state.tournaments.push({
       ...input,
+      semester,
       id: randomUUID(),
       status: "draft",
       entries: [],
@@ -161,7 +189,10 @@ export async function applyAction(
       t.status === "draft",
       "Ayarlar yalnız turnuva başlamadan değişir.",
     );
-    Object.assign(t, tournamentSchema.parse(p));
+    const input = tournamentSchema.parse(p);
+    const semester = input.semester ?? t.semester;
+    requireThat(state.semesters.includes(semester), "Dönem bulunamadı.");
+    Object.assign(t, input, { semester });
     return;
   }
   if (action === "tournament.entries") {

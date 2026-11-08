@@ -10,6 +10,8 @@ export const backupSchema = z
     schemaVersion: z.literal(1),
     revision: z.number().int().nonnegative(),
     state: z.object({
+      semesters: z.array(z.string().min(1).max(120)).min(1).optional(),
+      activeSemester: z.string().min(1).max(120).optional(),
       policy: policySchema,
       players: z.array(
         z.object({
@@ -53,7 +55,7 @@ export const backupSchema = z
           semester: z.string(),
           roundsPlanned: z.number().int().min(1).max(15),
           timeControl: z.string(),
-          variant: z.enum(["standard", "chess960"]),
+          variant: z.string().optional(),
           countsPoints: z.boolean(),
           countsRating: z.boolean(),
           status: z.enum(["draft", "live", "finished"]),
@@ -104,6 +106,14 @@ export const backupSchema = z
   })
   .superRefine((backup, ctx) => {
     const s = backup.state;
+    if (
+      s.semesters &&
+      (new Set(s.semesters).size !== s.semesters.length ||
+        !s.activeSemester ||
+        !s.semesters.includes(s.activeSemester) ||
+        s.tournaments.some((t) => !s.semesters!.includes(t.semester)))
+    )
+      ctx.addIssue({ code: "custom", message: "Invalid semester registry" });
     const unique = (ids: string[]) => new Set(ids).size === ids.length;
     if (
       !s.managers.some((m) => m.role === "owner") ||

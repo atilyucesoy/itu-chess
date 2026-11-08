@@ -46,7 +46,7 @@ async function fixture(
     {
       name: "Haftalık Yıldırım",
       date: "2026-11-07",
-      semester: "2026 Güz",
+      semester: state.activeSemester,
       roundsPlanned: rounds,
       timeControl: "3+2",
       variant: "standard",

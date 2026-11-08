@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useId,
+  cloneElement,
+  isValidElement,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import {
   Trophy,
   Users,
@@ -23,6 +32,8 @@ import {
   CalendarDays,
   Clock3,
   Shuffle,
+  Play,
+  Maximize,
   Medal,
   ArrowRight,
   CheckCircle2,
@@ -39,8 +50,14 @@ import {
   type Tournament,
   type Player,
   type Result,
+  suggestedSemester,
 } from "../shared/types";
 import { standings, championship } from "../shared/standings";
+import SemesterSettings from "./components/SemesterSettings";
+import AppearanceSettings, {
+  type Palette,
+} from "./components/AppearanceSettings";
+import Projection from "./components/Projection";
 
 type Page =
   | "home"
@@ -48,9 +65,13 @@ type Page =
   | "players"
   | "championship"
   | "settings"
-  | "tournament";
+  | "tournament"
+  | "projection";
+// Projection is a read-only route; it uses the same public data and polling.
 type Modal = { title: string; content: ReactNode } | null;
 const empty: PublicState = {
+  semesters: [suggestedSemester()],
+  activeSemester: suggestedSemester(),
   players: [],
   tournaments: [],
   policy: DEFAULT_POLICY,
@@ -71,12 +92,6 @@ const labels = {
   live: "Devam ediyor",
   finished: "Tamamlandı",
 };
-function currentSemester() {
-  const d = new Date();
-  return d.getMonth() >= 7
-    ? `${d.getFullYear()}–${d.getFullYear() + 1} Güz`
-    : `${d.getFullYear() - 1}–${d.getFullYear()} Bahar`;
-}
 function ClubMark({ size = 28 }: { size?: number }) {
   return (
     <img
@@ -146,11 +161,23 @@ function Field({
   children: ReactNode;
   hint?: string;
 }) {
+  const hintId = useId();
   return (
     <label className="field">
       <span>{label}</span>
-      {children}
-      {hint && <small>{hint}</small>}
+      {isValidElement(children)
+        ? cloneElement(
+            children as ReactElement<{
+              "aria-label"?: string;
+              "aria-describedby"?: string;
+            }>,
+            {
+              "aria-label": label,
+              "aria-describedby": hint ? hintId : undefined,
+            },
+          )
+        : children}
+      {hint && <small id={hintId}>{hint}</small>}
     </label>
   );
 }
@@ -197,10 +224,19 @@ export default function App() {
   const [dark, setDark] = useState(
     localStorage.getItem("itu-theme") === "dark",
   );
-  const [semester, setSemester] = useState(currentSemester());
+  const [palette, setPalette] = useState<Palette>(
+    localStorage.getItem("itu-palette") === "green" ? "green" : "brown",
+  );
+  const [semesterSelection, setSemester] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [page, id] = route.split("/") as [Page, string | undefined];
+  const semester =
+    page === "championship" &&
+    semesterSelection &&
+    state.semesters.includes(semesterSelection)
+      ? semesterSelection
+      : state.activeSemester;
   const notify = useCallback(
     (message: string, error = false) => setToast({ message, error }),
     [],
@@ -239,6 +275,16 @@ export default function App() {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("itu-theme", dark ? "dark" : "light");
   }, [dark]);
+  useEffect(() => {
+    document.documentElement.dataset.palette = palette;
+    localStorage.setItem("itu-palette", palette);
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute(
+        "content",
+        palette === "green" ? "#173b33" : dark ? "#211d19" : "#624a35",
+      );
+  }, [palette, dark]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 6500);
@@ -329,6 +375,8 @@ export default function App() {
       title: "Yeni turnuva",
       content: (
         <TournamentForm
+          semesters={state.semesters}
+          activeSemester={state.activeSemester}
           onSave={async (data) => {
             if (
               await action("tournament.create", data, "Turnuva oluşturuldu")
@@ -411,14 +459,13 @@ export default function App() {
   );
   const live = tournaments.filter((t) => t.status === "live");
   const finished = tournaments.filter((t) => t.status === "finished");
-  const semesters = [
-    ...new Set([currentSemester(), ...tournaments.map((t) => t.semester)]),
-  ];
+  const semesters = state.semesters;
   const title =
     {
       home: "Kulüp özeti",
       tournaments: "Turnuvalar",
       tournament: "Turnuva masası",
+      projection: "Projeksiyon",
       players: "Oyuncular",
       championship: "Dönem sıralaması",
       settings: "Kulüp ayarları",
@@ -428,7 +475,7 @@ export default function App() {
     if (p) profile(p);
   };
   return (
-    <div className="app">
+    <div className={`app ${page === "projection" ? "projecting" : ""}`}>
       <aside className={`sidebar ${mobile ? "open" : ""}`}>
         <a href="#home" className="brand">
           <div className="brand-icon">
@@ -506,9 +553,21 @@ export default function App() {
             <strong>{title}</strong>
           </div>
           <div className="top-actions">
-            <span className="season-chip">
+            <select
+              className="palette-selector"
+              aria-label="Renk teması"
+              value={palette}
+              onChange={(e) => setPalette(e.target.value as Palette)}
+            >
+              <option value="brown">Kahverengi</option>
+              <option value="green">Yeşil</option>
+            </select>
+            <span
+              className="season-chip"
+              title="Yeni turnuvalar için aktif dönem"
+            >
               <i />
-              {semester}
+              {state.activeSemester}
             </span>
             <button
               className="icon-button"
@@ -590,6 +649,16 @@ export default function App() {
             </div>
           ) : (
             <>
+              {page === "projection" && (
+                <Projection
+                  tournament={state.tournaments.find((t) => t.id === id)}
+                  sandbox={workspace !== "club"}
+                  expired={workspace === "expired"}
+                  onRefresh={() => {
+                    load().catch((e) => notify(e.message, true));
+                  }}
+                />
+              )}
               {page === "home" && (
                 <>
                   <div className="page-heading">
@@ -826,14 +895,8 @@ export default function App() {
                           onClick={() => go(`tournament/${t.id}`)}
                         >
                           <div className="tournament-card-top">
-                            <div
-                              className={`event-icon ${t.variant === "chess960" ? "purple" : ""}`}
-                            >
-                              {t.variant === "chess960" ? (
-                                <Shuffle size={23} />
-                              ) : (
-                                <ClubMark size={32} />
-                              )}
+                            <div className="event-icon">
+                              <ClubMark size={32} />
                             </div>
                             <Badge status={t.status} />
                           </div>
@@ -854,11 +917,7 @@ export default function App() {
                             </span>
                           </div>
                           <div className="event-tags">
-                            <span>
-                              {t.variant === "chess960"
-                                ? "Chess960"
-                                : "İsviçre sistemi"}
-                            </span>
+                            <span>İsviçre sistemi</span>
                             {t.countsPoints && <span>Dönem puanlı</span>}
                             {t.countsRating && <span>İTÜ Elo</span>}
                           </div>
@@ -1107,8 +1166,8 @@ export default function App() {
                   </div>
                   <p className="footnote">
                     Puan eşitliğinde birincilik, ardından ikincilik ve sonraki
-                    derecelerin sayısı karşılaştırılır. Chess960 ve puansız
-                    etkinlikler yalnız etkinlik ayarı açıksa dahil edilir.
+                    derecelerin sayısı karşılaştırılır. Puansız etkinlikler
+                    dönem sıralamasına dahil edilmez.
                   </p>
                   <div className="section-heading">
                     <h2>Puan getiren turnuvalar</h2>
@@ -1144,6 +1203,8 @@ export default function App() {
                           title: "Turnuva ayarları",
                           content: (
                             <TournamentForm
+                              semesters={state.semesters}
+                              activeSemester={state.activeSemester}
                               tournament={t}
                               onSave={async (data) => {
                                 if (
@@ -1168,6 +1229,14 @@ export default function App() {
               {page === "settings" &&
                 (user ? (
                   <SettingsPage
+                    appearance={
+                      <AppearanceSettings
+                        palette={palette}
+                        dark={dark}
+                        onPalette={setPalette}
+                        onDark={setDark}
+                      />
+                    }
                     state={state}
                     user={user}
                     action={action}
@@ -1332,7 +1401,6 @@ function PlayerForm({
           required
           maxLength={120}
           defaultValue={player?.name}
-          placeholder="Örn. Deniz Yılmaz"
         />
       </Field>
       <div className="form-row">
@@ -1372,12 +1440,15 @@ function PlayerForm({
 }
 function TournamentForm({
   tournament: t,
+  semesters,
+  activeSemester,
   onSave,
 }: {
   tournament?: Tournament;
+  semesters: string[];
+  activeSemester: string;
   onSave: (data: object) => Promise<void>;
 }) {
-  const [variant, setVariant] = useState(t?.variant ?? "standard");
   const [points, setPoints] = useState(t?.countsPoints ?? true);
   const [rated, setRated] = useState(t?.countsRating ?? true);
   const [saving, setSaving] = useState(false);
@@ -1394,7 +1465,6 @@ function TournamentForm({
           semester: d.get("semester"),
           roundsPlanned: Number(d.get("rounds")),
           timeControl: d.get("time"),
-          variant,
           countsPoints: points,
           countsRating: rated,
         });
@@ -1421,13 +1491,15 @@ function TournamentForm({
           />
         </Field>
         <Field label="Dönem">
-          <input
+          <select
             name="semester"
             required
-            maxLength={120}
-            defaultValue={t?.semester ?? currentSemester()}
-            list="semester-options"
-          />
+            defaultValue={t?.semester ?? activeSemester}
+          >
+            {semesters.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
         </Field>
       </div>
       <div className="form-row">
@@ -1450,20 +1522,6 @@ function TournamentForm({
           />
         </Field>
       </div>
-      <Field label="Satranç türü">
-        <select
-          value={variant}
-          onChange={(e) => {
-            const v = e.target.value as typeof variant;
-            setVariant(v);
-            setPoints(v === "standard");
-            setRated(v === "standard");
-          }}
-        >
-          <option value="standard">Standart satranç</option>
-          <option value="chess960">Chess960</option>
-        </select>
-      </Field>
       <label className="check-row">
         <input
           type="checkbox"
@@ -1602,10 +1660,7 @@ function TournamentDesk({
       </a>
       <div className="page-heading tournament-heading">
         <div>
-          <div className="eyebrow">
-            {t.semester} ·{" "}
-            {t.variant === "chess960" ? "CHESS960" : "HAFTALIK TURNUVA"}
-          </div>
+          <div className="eyebrow">{t.semester}</div>
           <h1>{t.name}</h1>
           <div className="detail-meta">
             <span>
@@ -1624,6 +1679,12 @@ function TournamentDesk({
           </div>
         </div>
         <div className="button-group">
+          {!!t.rounds.length && (
+            <a className="button secondary small" href={`#projection/${t.id}`}>
+              <Maximize size={16} />
+              Tam ekran eşlendirmeler
+            </a>
+          )}
           <button
             className="button secondary small"
             onClick={() => {
@@ -1739,15 +1800,13 @@ function TournamentDesk({
                 <Flag size={17} />
               )
             ) : (
-              <Shuffle size={17} />
+              <Play size={18} fill="currentColor" />
             )}{" "}
             {finalRound
               ? needsLots
                 ? "Eşitlik kurasını çek"
                 : "Turnuvayı tamamla"
-              : t.status === "draft"
-                ? "İlk turu eşlendir"
-                : "Sonraki turu eşlendir"}
+              : `${t.rounds.length + 1}. turu eşlendir`}
           </button>
         )}
       </div>
@@ -1817,10 +1876,7 @@ function TournamentDesk({
       {tab === "pairings" && (
         <div className="card">
           {!round ? (
-            <Empty
-              icon={<Shuffle size={40} />}
-              title="İlk eşlendirme bekleniyor"
-            >
+            <Empty icon={<Play size={40} />} title="İlk eşlendirme bekleniyor">
               {user
                 ? "Oyuncular sekmesinden katılımcıları seç, ardından ilk turu eşlendir."
                 : "Turnuva yöneticisi ilk turu eşlendirdiğinde burada görebilirsin."}
@@ -2152,8 +2208,7 @@ function TournamentDesk({
               </dd>
             </dl>
             <p className="footnote">
-              Kulüp turnuvasıdır; resmî FIDE ratingi üretmez. Chess960 başlangıç
-              konumu fiziksel tahtalarda organizatör tarafından belirlenir.
+              Kulüp turnuvasıdır; resmî FIDE ratingi üretmez.
             </p>
             {user && allDone && (
               <a
@@ -2533,6 +2588,7 @@ function PlayerProfile({
   );
 }
 function SettingsPage({
+  appearance,
   state,
   user,
   action,
@@ -2541,6 +2597,7 @@ function SettingsPage({
   sandbox,
   onEnterSandbox,
 }: {
+  appearance: ReactNode;
   state: PublicState;
   user: SessionUser;
   action: Action;
@@ -2582,6 +2639,8 @@ function SettingsPage({
         </section>
       )}
       <div className="settings-grid">
+        <SemesterSettings state={state} owner={owner} action={action} />
+        {appearance}
         <section className="card padded">
           <h2>İTÜ Elo politikası</h2>
           <p className="muted">Kulüp içinde karar verdikçe değiştirilebilir.</p>

@@ -17,6 +17,10 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await page.getByRole("link", { name: "Oyuncular", exact: true }).click();
   await page.getByRole("button", { name: "Oyuncu ekle" }).click();
   await page.getByLabel("Ad soyad").fill("Deniz Yılmaz");
+  await expect(page.getByLabel("Ad soyad")).not.toHaveAttribute(
+    "placeholder",
+    /Deniz/,
+  );
   await page.getByRole("spinbutton", { name: /Resmî rating/ }).fill("1800");
   await page.getByRole("button", { name: "Oyuncuyu kaydet" }).click();
   await expect(
@@ -51,6 +55,8 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await page.getByRole("button", { name: "Yeni turnuva", exact: true }).click();
   await page.getByLabel("Turnuva adı").fill("Cuma Yıldırım · Test");
   await page.getByLabel("Tur sayısı").fill("1");
+  await expect(page.getByLabel("Satranç türü")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).not.toContainText("Chess960");
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Turnuva oluştur", exact: true })
@@ -58,7 +64,7 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await page.getByRole("button", { name: /Cuma Yıldırım · Test/ }).click();
   await page.getByRole("button", { name: "Tümünü seç" }).click();
   await page.getByRole("button", { name: "8 oyuncuyu kaydet" }).click();
-  await page.getByRole("button", { name: "İlk turu eşlendir" }).click();
+  await page.getByRole("button", { name: "1. turu eşlendir" }).click();
   await expect(
     page.getByRole("heading", { name: "1. tur eşlendirmeleri" }),
   ).toBeVisible();
@@ -92,7 +98,7 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
       payload: {
         name: "Gelecek hafta",
         date: "2026-11-14",
-        semester: "Test Güz",
+        semester: snapshot.state.activeSemester,
         roundsPlanned: 7,
         timeControl: "3+2",
         variant: "standard",
@@ -163,6 +169,13 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await expect(
     page.getByRole("heading", { name: "1. tur eşlendirmeleri" }),
   ).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .locator(".sidebar")
+        .evaluate((el) => el.getBoundingClientRect().right),
+    )
+    .toBeLessThanOrEqual(0);
   await page.screenshot({
     path: "test-results/pairings-mobile.png",
     fullPage: true,
@@ -331,7 +344,7 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
   await page.getByRole("button", { name: /abc deneme turnuvası/ }).click();
   await page.getByRole("button", { name: "Tümünü seç" }).click();
   await page.getByRole("button", { name: "2 oyuncuyu kaydet" }).click();
-  await page.getByRole("button", { name: "İlk turu eşlendir" }).click();
+  await page.getByRole("button", { name: "1. turu eşlendir" }).click();
   await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
   await page
     .getByRole("button", { name: "Turnuvayı tamamla", exact: true })

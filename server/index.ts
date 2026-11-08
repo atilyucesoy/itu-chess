@@ -15,6 +15,7 @@ import {
 import { applyAction } from "./domain.js";
 import { toTrf, ENGINE_VERSION, enginePath } from "./engine.js";
 import { emptyState, type Manager, type State } from "../shared/types.js";
+import { migrateState } from "../shared/migrate.js";
 import {
   developerModeEnabled,
   SandboxRegistry,
@@ -40,6 +41,9 @@ if (secret.length < 32)
   throw new Error("SESSION_SECRET must contain at least 32 characters.");
 const sessionSecret = secret;
 const snapshot = await store.load();
+const originalState = snapshot.state;
+snapshot.state = migrateState(snapshot.state);
+let initializationChanged = snapshot.state !== originalState;
 if (!snapshot.state.managers.length) {
   const password = process.env.ADMIN_PASSWORD;
   if (!password || password.length < 12)
@@ -53,9 +57,13 @@ if (!snapshot.state.managers.length) {
     role: "owner",
     passwordHash: hashPassword(password),
   });
-  if (!(await store.save(snapshot.state, snapshot.revision)))
-    throw new Error("Concurrent setup detected; restart.");
+  initializationChanged = true;
 }
+if (
+  initializationChanged &&
+  !(await store.save(snapshot.state, snapshot.revision))
+)
+  throw new Error("Concurrent setup detected; restart.");
 const app = express();
 if (production) app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -142,6 +150,8 @@ function clearSandbox(
 }
 function publicData(state: State) {
   return {
+    semesters: state.semesters,
+    activeSemester: state.activeSemester,
     players: state.players,
     tournaments: state.tournaments.map((t) => ({
       ...t,
@@ -192,7 +202,7 @@ app.post("/api/developer/enter", async (req, res) => {
     return;
   }
   clearSandbox(req, res, user.id);
-  const token = sandboxes.create(user.id, live.state.policy);
+  const token = sandboxes.create(user.id, live.state.policy, live.state);
   // Keep a session cookie after memory expiration: it identifies an expired
   // sandbox instead of silently routing the browser back to production data.
   res.cookie("itu_sandbox", token, {
@@ -235,7 +245,7 @@ app.post("/api/developer/reset", async (req, res) => {
     res.status(410).json({ error: "Deneme oturumu sona erdi." });
     return;
   }
-  if (!memory.reset(live.state.policy, ctx.revision)) {
+  if (!memory.reset(live.state.policy, ctx.revision, live.state)) {
     res
       .status(409)
       .json({ error: "Deneme kayıtları değişti; tekrar deneyin." });
