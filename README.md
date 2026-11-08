@@ -14,7 +14,7 @@ Screenshots use fictional automated-test data, not real club records. [1080p pro
 
 ## Run locally
 
-Linux x64, Node **22.13+**, npm, `tar` required. No paid services or API keys required locally.
+Linux x64, Node **22.13+**, npm, `tar` required. Older glibc hosts also need `g++` (C++20) and `make` to build the verified engine source automatically. No paid services or API keys required locally.
 
 ```bash
 git clone https://github.com/atilyucesoy/itu-chess.git
@@ -153,7 +153,7 @@ Tests include full seven-round even/odd tournaments, no repeated played opponent
 
 ## Pairing rules and licensing
 
-bbpPairings is downloaded from the pinned v6.0.0 release with SHA-256 verification; upstream Apache-2.0 license and notices are retained in `bin/bbpPairings-v6.0.0/`. It supports the Dutch rules effective February 2026. This application **is not FIDE-endorsed**, does not submit events to FIDE, and does not claim certification based on using an existing engine. No hand-written Swiss fallback is used.
+bbpPairings is downloaded from the pinned v6.0.0 release with SHA-256 verification; upstream Apache-2.0 license and notices are retained in `bin/bbpPairings-v6.0.0/`. If the official executable needs a newer glibc than the host provides (as on Render), installation compiles the **same unchanged v6.0.0 source**, pinned by commit and archive SHA-256, using the host's C++20 compiler. `npm run engine:install -- --source` forces that path, and CI tests the source-built engine. This is not a replacement pairing algorithm. It supports the Dutch rules effective February 2026. This application **is not FIDE-endorsed**, does not submit events to FIDE, and does not claim certification based on using an existing engine. No hand-written Swiss fallback is used.
 
 - [FIDE Dutch, February 2026](https://handbook.fide.com/chapter/C0403202602)
 - [FIDE tie-breaks, March 2026](https://handbook.fide.com/chapter/TieBreakRegulations032026)
