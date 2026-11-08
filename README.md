@@ -1,5 +1,9 @@
 # İTÜ Satranç
 
+[![CI](https://github.com/atilyucesoy/itu-chess/actions/workflows/ci.yml/badge.svg)](https://github.com/atilyucesoy/itu-chess/actions/workflows/ci.yml)
+
+A tournament-management web application built for Istanbul Technical University's chess club: reusable player profiles, FIDE Dutch Swiss pairing, a separate club Elo system, and semester Grand Prix standings. The UI is Turkish. The application is under development; a public live deployment is not yet available.
+
 Turkish, shared chess-club tournament manager. React + TypeScript frontend, Express backend, bbpPairings **6.0.0** FIDE Dutch engine. Local SQLite or hosted Supabase Postgres.
 
 ## Run locally
@@ -7,7 +11,8 @@ Turkish, shared chess-club tournament manager. React + TypeScript frontend, Expr
 Linux x64, Node **22.13+**, npm, `tar` required. No paid services or API keys required locally.
 
 ```bash
-cd /home/atil/Projects/itu-chess
+git clone https://github.com/atilyucesoy/itu-chess.git
+cd itu-chess
 npm ci
 npm run setup
 npm run engine:install
@@ -67,7 +72,7 @@ Current-round results are editable. To change an earlier result, explicitly undo
 Nothing is deployed automatically. You need a free GitHub account, Render account and Supabase project. Organizer accounts inside the website do **not** require hosting-provider accounts.
 
 1. Create a **Supabase Free** project. Run **`supabase/schema.sql`** in its SQL editor. Tables and RPC are private to the server's service-role key; anonymous/authenticated browser clients cannot read raw state or password hashes.
-2. Put this source in a GitHub repository (exclude `.env`, `data/`, `bin/`, `node_modules/`). No Git repository or remote is created by the application.
+2. Fork or clone [atilyucesoy/itu-chess](https://github.com/atilyucesoy/itu-chess). Keep `.env`, `data/`, `bin/`, `node_modules/` excluded from Git.
 3. In Render, create a Blueprint using **`render.yaml`**, selecting **Free**. Or create a Node web service manually:
    - Build: `npm ci && npm run engine:install && npm run build`
    - Start: `npm start`

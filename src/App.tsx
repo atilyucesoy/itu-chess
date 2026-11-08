@@ -77,11 +77,16 @@ function currentSemester() {
     ? `${d.getFullYear()}–${d.getFullYear() + 1} Güz`
     : `${d.getFullYear() - 1}–${d.getFullYear()} Bahar`;
 }
-function Knight({ size = 28 }: { size?: number }) {
+function ClubMark({ size = 28 }: { size?: number }) {
   return (
-    <span className="knight" style={{ fontSize: size }} aria-hidden="true">
-      ♞
-    </span>
+    <img
+      className="club-mark"
+      src="/club-logo-gold.png"
+      width={size}
+      height={size}
+      alt=""
+      aria-hidden="true"
+    />
   );
 }
 function Badge({ status }: { status: Tournament["status"] }) {
@@ -113,7 +118,7 @@ function Rating({
   );
 }
 function Empty({
-  icon = <Knight size={46} />,
+  icon = <ClubMark size={46} />,
   title,
   children,
   action,
@@ -382,14 +387,14 @@ export default function App() {
       <aside className={`sidebar ${mobile ? "open" : ""}`}>
         <a href="#home" className="brand">
           <div className="brand-icon">
-            <Knight size={35} />
+            <ClubMark size={35} />
           </div>
           <div>
             İTÜ <b>SATRANÇ</b>
             <small>İstanbul Teknik Üniversitesi</small>
           </div>
         </a>
-        <div className="nav-label">KULÜBÜN OYUN ALANI</div>
+        <div className="nav-label">TURNUVA YÖNETİMİ</div>
         <nav>
           {(
             [
@@ -419,14 +424,6 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="club-note">
-            <span className="tiny-board">▦</span>
-            <p>
-              Aynı masa.
-              <br />
-              <strong>Her hafta yeni bir oyun.</strong>
-            </p>
-          </div>
           {user && (
             <a
               href="#settings"
@@ -504,8 +501,8 @@ export default function App() {
         <div className="content" aria-busy={busy || loading}>
           {loading ? (
             <div className="loading">
-              <Knight size={55} />
-              <p>Kulüp masası hazırlanıyor…</p>
+              <ClubMark size={55} />
+              <p>Yükleniyor…</p>
             </div>
           ) : (
             <>
@@ -513,9 +510,8 @@ export default function App() {
                 <>
                   <div className="page-heading">
                     <div>
-                      <div className="eyebrow">HAMLE SENDE</div>
-                      <h1>Güzel oyunlar, iyi arkadaşlar.</h1>
-                      <p>Haftalık turnuvalarımızın buluşma noktası.</p>
+                      <h1>Genel bakış</h1>
+                      <p>Turnuvalar, oyuncular ve dönem sıralaması.</p>
                     </div>
                     {user && (
                       <button className="button" onClick={newTournament}>
@@ -526,20 +522,11 @@ export default function App() {
                   </div>
                   <section className="hero">
                     <div className="hero-copy">
-                      <span className="hero-tag">
-                        <span />
-                        İTÜ SATRANÇ KULÜBÜ
-                      </span>
-                      <h2>
-                        Bir hamle.
-                        <br />
-                        <em>Bir sonraki hikâye.</em>
-                      </h2>
+                      <h2>İTÜ Satranç Kulübü</h2>
                       <p>
-                        Tahtada rakip, masanın dışında arkadaşız.
-                        <br />
-                        Turnuvanı bul, eşlendirmelere göz at, kulübün ritmini
-                        yakala.
+                        {live[0]
+                          ? `Devam eden turnuva: ${live[0].name}`
+                          : "Haftalık turnuva sonuçları ve eşlendirmeler."}
                       </p>
                       <button
                         className="button cream"
@@ -553,28 +540,16 @@ export default function App() {
                       >
                         {live.length
                           ? "Devam eden turnuvaya git"
-                          : "Turnuvaları keşfet"}
+                          : "Turnuvaları görüntüle"}
                         <ArrowUpRight size={18} />
                       </button>
                     </div>
                     <div className="hero-art" aria-hidden="true">
-                      <div className="orbit orbit-one" />
-                      <div className="orbit orbit-two" />
-                      <div className="chessboard-art">
-                        {Array.from({ length: 36 }, (_, i) => (
-                          <i
-                            key={i}
-                            className={
-                              (Math.floor(i / 6) + i) % 2 ? "shade" : ""
-                            }
-                          />
-                        ))}
-                      </div>
-                      <span className="big-knight">♞</span>
-                      <span className="little-star">✧</span>
-                      <span className="art-caption">
-                        EST. İTÜ · HER HAFTA YENİ BİR OYUN
-                      </span>
+                      <img
+                        className="hero-club-logo"
+                        src="/club-logo-gold.png"
+                        alt=""
+                      />
                     </div>
                   </section>
                   <div className="stats-grid">
@@ -583,26 +558,24 @@ export default function App() {
                         Users,
                         state.players.length,
                         "Kayıtlı oyuncu",
-                        "Kulübün hafızası",
+                        "Oyuncu havuzu",
                       ],
                       [
                         Trophy,
                         finished.length,
                         "Tamamlanan turnuva",
-                        "Tahtada yazılan hikâyeler",
+                        "Turnuva arşivi",
                       ],
                       [
                         Flag,
                         live.length,
                         "Devam eden turnuva",
-                        live.length
-                          ? "Heyecan devam ediyor"
-                          : "Bir sonraki maça hazır",
+                        live.length ? "Sonuç girişi açık" : "Aktif turnuva yok",
                       ],
                       [
                         Medal,
                         championship(state, semester).length,
-                        "Dönem yarışında",
+                        "Dönem sıralamasındaki oyuncu",
                         semester,
                       ],
                     ].map(([Icon, value, label, sub], i) => {
@@ -631,7 +604,7 @@ export default function App() {
                       <div className="card tournament-list">
                         {!tournaments.length ? (
                           <Empty
-                            title="İlk tur burada başlayacak"
+                            title="Henüz turnuva yok"
                             action={
                               user ? (
                                 <button
@@ -697,13 +670,13 @@ export default function App() {
                         ) : (
                           <Empty
                             icon={<Medal size={34} />}
-                            title="Podyum seni bekliyor"
+                            title="Henüz dönem puanı yok"
                           >
-                            İlk turnuvayla birlikte dönem yarışı başlıyor.
+                            Puanlı bir turnuva tamamlandığında sıralama oluşur.
                           </Empty>
                         )}
                         <div className="points-note">
-                          Her turnuva, şampiyonluğa bir adım.
+                          İlk 10 oyuncuya Grand Prix puanı verilir.
                         </div>
                       </div>
                     </section>
@@ -713,8 +686,6 @@ export default function App() {
                     <span>FIDE Dutch eşlendirme sistemi</span>
                     <span className="dot">·</span>
                     <span>Kulübe özel İTÜ Elo</span>
-                    <span className="dot">·</span>
-                    <span>Oyunun keyfi hep aynı.</span>
                   </div>
                 </>
               )}
@@ -722,11 +693,8 @@ export default function App() {
                 <>
                   <div className="page-heading">
                     <div>
-                      <div className="eyebrow">TAHTANIN BAŞINDA</div>
                       <h1>Turnuvalar</h1>
-                      <p>
-                        Bu haftanın heyecanı ve geçmiş turnuvaların hikâyesi.
-                      </p>
+                      <p>Devam eden ve tamamlanan turnuvalar.</p>
                     </div>
                     {user && (
                       <button className="button" onClick={newTournament}>
@@ -780,7 +748,7 @@ export default function App() {
                               {t.variant === "chess960" ? (
                                 <Shuffle size={23} />
                               ) : (
-                                <Knight size={32} />
+                                <ClubMark size={32} />
                               )}
                             </div>
                             <Badge status={t.status} />
@@ -842,12 +810,11 @@ export default function App() {
                 <>
                   <div className="page-heading">
                     <div>
-                      <div className="eyebrow">KULÜBÜN KADROSU</div>
                       <h1>
                         Oyuncular{" "}
                         <span className="count">{state.players.length}</span>
                       </h1>
-                      <p>Bir kez ekle, her turnuvada tahtaya davet et.</p>
+                      <p>Kayıtlı oyuncular ve ratingleri.</p>
                     </div>
                     {user && (
                       <button className="button" onClick={() => playerForm()}>
@@ -945,7 +912,10 @@ export default function App() {
                       </tbody>
                     </table>
                     {!state.players.length && (
-                      <Empty icon={<Users size={40} />} title="Tanışma zamanı">
+                      <Empty
+                        icon={<Users size={40} />}
+                        title="Henüz oyuncu yok"
+                      >
                         Oyuncular sekmesinden isim ve varsa Elo/UKD
                         ekleyebilirsin. İTÜ Elo ilk turnuvadan sonra hesaplanır.
                       </Empty>
@@ -961,9 +931,8 @@ export default function App() {
                 <>
                   <div className="page-heading">
                     <div>
-                      <div className="eyebrow">HER HAFTA BİR ADIM</div>
                       <h1>Dönem sıralaması</h1>
-                      <p>İstikrarın, güzel oyunların ve podyumların toplamı.</p>
+                      <p>Seçilen dönemdeki Grand Prix puanları.</p>
                     </div>
                     <select
                       aria-label="Dönem seç"
@@ -979,7 +948,7 @@ export default function App() {
                     <Trophy size={25} />
                     <div>
                       <strong>İTÜ Grand Prix</strong>
-                      <p>İlk 10 oyuncuya puan · Her dönem yeni bir yarış</p>
+                      <p>İlk 10 oyuncuya puan · Dönemlik sıralama</p>
                     </div>
                     <div className="f1-points">
                       {F1.map((p, i) => (
@@ -1137,9 +1106,15 @@ export default function App() {
           )}
           <footer className="main-footer">
             <span>
-              <Knight size={17} /> İTÜ Satranç Kulübü
+              <ClubMark size={17} /> İTÜ Satranç Kulübü
             </span>
-            <span>Oyun biter, dostluk kalır.</span>
+            <a
+              href="https://github.com/atilyucesoy/itu-chess"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub · atilyucesoy/itu-chess
+            </a>
           </footer>
         </div>
       </main>
@@ -2495,7 +2470,6 @@ function SettingsPage({
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">KULÜBÜN KONTROL MASASI</div>
           <h1>Kulüp ayarları</h1>
           <p>Rating politikası, yönetici hesapları ve verilerin.</p>
         </div>

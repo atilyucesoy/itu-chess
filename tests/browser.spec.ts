@@ -7,7 +7,7 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Güzel oyunlar, iyi arkadaşlar." }),
+    page.getByRole("heading", { name: "Genel bakış", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Yönetici girişi" }).click();
   await page.getByLabel("Kullanıcı adı", { exact: true }).fill("testowner");
@@ -130,7 +130,7 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
   await page.goto("/#home");
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Güzel oyunlar, iyi arkadaşlar." }),
+    page.getByRole("heading", { name: "Genel bakış", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/home-desktop.png",
