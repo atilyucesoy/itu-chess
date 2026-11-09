@@ -42,6 +42,9 @@ import {
   AlertCircle,
   Crown,
   Copy,
+  Archive,
+  ArchiveRestore,
+  Trash2,
 } from "lucide-react";
 import {
   DEFAULT_POLICY,
@@ -228,6 +231,7 @@ export default function App() {
   );
   const [semesterSelection, setSemester] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [filter, setFilter] = useState("all");
   const stateTag = useRef<string | null>(null);
   const loadSequence = useRef(0);
@@ -343,7 +347,7 @@ export default function App() {
       kind !== "enter" &&
       !confirm(
         kind === "reset"
-          ? "Deneme alanındaki TÜM oyuncular, turnuvalar, ratingler ve işlem kayıtları silinsin mi?"
+          ? "Deneme alanındaki tüm değişiklikler silinsin ve kadro bugünkü hâline dönsün mü?"
           : "Deneme verileri silinip gerçek kulüp kayıtlarına dönülsün mü?",
       )
     )
@@ -411,7 +415,7 @@ export default function App() {
       content: (
         <LateEntryForm
           players={state.players.filter(
-            (p) => !t.entries.some((e) => e.playerId === p.id),
+            (p) => !p.archivedAt && !t.entries.some((e) => e.playerId === p.id),
           )}
           nextRound={t.rounds.length + 1}
           onAdd={(playerIds) => add({ playerIds })}
@@ -419,6 +423,56 @@ export default function App() {
             <PlayerForm onSave={(newPlayer) => add({ newPlayer })} />
           }
         />
+      ),
+    });
+  }
+  function archivePlayer(player: Player) {
+    const rest = player.archivedAt ? "arşivden çıkarıldı" : "arşivlendi";
+    return action(
+      "player.archive",
+      { id: player.id, archived: !player.archivedAt },
+      `${player.name} ${rest}`,
+    );
+  }
+  function deletePlayer(player: Player) {
+    setModal({
+      title: "Oyuncuyu sil",
+      content: (
+        <div>
+          <p>
+            <strong>{player.name}</strong> kayıtlı oyunculardan tamamen
+            silinsin mi?
+          </p>
+          <p className="muted">
+            Bu işlem geri alınamaz. Bir turnuvada oynamış ya da manuel rating
+            düzeltmesi olan oyuncular silinemez; onları arşivleyin.
+          </p>
+          <div className="button-group">
+            <button
+              className="button danger"
+              disabled={busy}
+              onClick={async () => {
+                if (
+                  await action(
+                    "player.delete",
+                    { id: player.id },
+                    `${player.name} silindi`,
+                  )
+                )
+                  setModal(null);
+              }}
+            >
+              <Trash2 size={16} />
+              Kalıcı olarak sil
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => setModal(null)}
+            >
+              Vazgeç
+            </button>
+          </div>
+        </div>
       ),
     });
   }
@@ -696,13 +750,19 @@ export default function App() {
                   </p>
                   <ul>
                     <li>
-                      Bu tarayıcıya özel, boş bir oyuncu ve turnuva alanı
-                      açılır. Aynı ortak hesapla farklı cihazlarda yapılan
-                      denemeler birbirinden ayrıdır.
+                      Mevcut kulüp kadrosunun bir kopyası ve boş bir turnuva
+                      alanı açılır. Aynı ortak hesapla farklı cihazlarda
+                      yapılan denemeler birbirinden ayrıdır.
+                    </li>
+                    <li>
+                      Oyuncu ekleyip silebilir, ratingleri değiştirebilirsin;
+                      hepsi yalnız bu denemede kalır. Kadro, alana girdiğin
+                      andaki hâlin kopyasıdır.
                     </li>
                     <li>
                       Denemeyi sıfırlayınca veya alandan çıkınca bu oyuncular,
-                      turnuvalar, puanlar ve işlem kayıtları temizlenir.
+                      turnuvalar, puanlar ve işlem kayıtları temizlenir;
+                      kadro bugünkü gerçek hâline döner.
                     </li>
                     <li>
                       Sunucu yeniden başlarsa/uyursa ya da dört saatlik oturum
@@ -1041,7 +1101,15 @@ export default function App() {
                     <div>
                       <h1>
                         Oyuncular{" "}
-                        <span className="count">{state.players.length}</span>
+                        <span className="count">
+                          {state.players.filter((p) => !p.archivedAt).length}
+                        </span>
+                        {showArchived && (
+                          <span className="count">
+                            {state.players.filter((p) => p.archivedAt).length}{" "}
+                            arşiv
+                          </span>
+                        )}
                       </h1>
                       <p>Kayıtlı oyuncular ve ratingleri.</p>
                     </div>
@@ -1058,6 +1126,18 @@ export default function App() {
                       onChange={setSearch}
                       placeholder="Oyuncu adı ara…"
                     />
+                    {!!state.players.some((p) => p.archivedAt) && (
+                      <button
+                        className="button secondary small"
+                        aria-pressed={showArchived}
+                        onClick={() => setShowArchived((v) => !v)}
+                      >
+                        <Archive size={15} />
+                        {showArchived
+                          ? "Arşivi gizle"
+                          : `Arşivlenenler (${state.players.filter((p) => p.archivedAt).length})`}
+                      </button>
+                    )}
                     <button
                       className="button secondary small"
                       onClick={() =>
@@ -1090,8 +1170,10 @@ export default function App() {
                       </thead>
                       <tbody>
                         {[...state.players]
+                          .filter((p) => showArchived || !p.archivedAt)
                           .sort(
                             (a, b) =>
+                              Number(!!a.archivedAt) - Number(!!b.archivedAt) ||
                               effectiveRating(b, state.policy.reference) -
                                 effectiveRating(a, state.policy.reference) ||
                               a.name.localeCompare(b.name, "tr"),
@@ -1104,7 +1186,7 @@ export default function App() {
                           .map((p, i) => (
                             <tr
                               key={p.id}
-                              className="clickable"
+                              className={`clickable${p.archivedAt ? " archived-row" : ""}`}
                               onClick={() => profile(p)}
                             >
                               <td className="muted">{i + 1}</td>
@@ -1125,16 +1207,62 @@ export default function App() {
                               </td>
                               <td>{p.games}</td>
                               <td>
-                                <span className="pill">
-                                  {p.itu === null
-                                    ? "Henüz derecesiz"
-                                    : p.games < state.policy.provisionalGames
-                                      ? "Geçici rating"
-                                      : "Kulüp oyuncusu"}
-                                </span>
+                                {p.archivedAt ? (
+                                  <span className="pill muted-pill">Arşivde</span>
+                                ) : (
+                                  <span className="pill">
+                                    {p.itu === null
+                                      ? "Henüz derecesiz"
+                                      : p.games < state.policy.provisionalGames
+                                        ? "Geçici rating"
+                                        : "Kulüp oyuncusu"}
+                                  </span>
+                                )}
                               </td>
                               <td>
-                                <ChevronRight size={16} />
+                                <div className="row-actions">
+                                  {user?.role === "owner" && (
+                                    <>
+                                      <button
+                                        className="icon-button"
+                                        title={
+                                          p.archivedAt
+                                            ? "Arşivden çıkar"
+                                            : "Arşivle"
+                                        }
+                                        aria-label={
+                                          p.archivedAt
+                                            ? `${p.name} arşivden çıkar`
+                                            : `${p.name} arşivle`
+                                        }
+                                        disabled={busy}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          archivePlayer(p);
+                                        }}
+                                      >
+                                        {p.archivedAt ? (
+                                          <ArchiveRestore size={16} />
+                                        ) : (
+                                          <Archive size={16} />
+                                        )}
+                                      </button>
+                                      <button
+                                        className="icon-button danger-icon"
+                                        title="Kalıcı olarak sil"
+                                        aria-label={`${p.name} sil`}
+                                        disabled={busy}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          deletePlayer(p);
+                                        }}
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </>
+                                  )}
+                                  <ChevronRight size={16} />
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -2212,7 +2340,7 @@ function TournamentDesk({
           <ParticipantPicker
             key={t.entries.map((e) => e.playerId).join(",")}
             t={t}
-            players={state.players}
+            players={state.players.filter((p) => !p.archivedAt)}
             last={lastTournament}
             onSave={(ids) =>
               action("tournament.entries", {
@@ -2442,6 +2570,10 @@ function ParticipantPicker({
   );
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const visible = players.filter((p) =>
+    p.name.toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")),
+  );
+  const allVisibleSelected = visible.every((p) => selected.has(p.id));
   return (
     <div className="card">
       <div className="picker-heading">
@@ -2471,15 +2603,20 @@ function ParticipantPicker({
           )}
           <button
             className="text-button"
-            onClick={() =>
-              setSelected(
-                selected.size === players.length
-                  ? new Set()
-                  : new Set(players.map((p) => p.id)),
-              )
-            }
+            onClick={() => {
+              const next = new Set(selected);
+              if (allVisibleSelected) visible.forEach((p) => next.delete(p.id));
+              else visible.forEach((p) => next.add(p.id));
+              setSelected(next);
+            }}
           >
-            {selected.size === players.length ? "Seçimi temizle" : "Tümünü seç"}
+            {allVisibleSelected
+              ? search
+                ? "Görünenlerin seçimini temizle"
+                : "Seçimi temizle"
+              : search
+                ? "Görünenleri seç"
+                : "Tümünü seç"}
           </button>
         </div>
       </div>
@@ -2742,10 +2879,11 @@ function SettingsPage({
         <section className="card padded developer-settings">
           <h2>Deneme alanı</h2>
           <p className="muted">
-            Bu tarayıcıya özel, boş ve ayrı bir deneme alanı açar. Deneme
-            verileri yalnız sunucu belleğinde tutulur; sıfırlama, çıkış veya
-            sunucu yeniden başlatıldığında silinir. Gerçek oyuncular, turnuvalar
-            ve ratingler değişmez. Yönetim kurulu hesabıyla da kullanılabilir.
+            Mevcut kadronun bir kopyasıyla bu tarayıcıya özel, ayrı bir deneme
+            alanı açar. Deneme verileri yalnız sunucu belleğinde tutulur;
+            sıfırlama, çıkış veya sunucu yeniden başlatıldığında silinir ve
+            kadro bugünkü hâline döner. Gerçek oyuncular, turnuvalar ve
+            ratingler değişmez. Yönetim kurulu hesabıyla da kullanılabilir.
           </p>
           <button className="button secondary" onClick={onEnterSandbox}>
             Deneme ortamını aç
@@ -2891,10 +3029,17 @@ function SettingsPage({
                   Kayıtlı yeni politika tüm rating turnuvalarına uygulanır.
                   Manuel düzeltmeler tarih sırasıyla korunur. Puanlar ve eski
                   eşlendirmeler değişmez.
+                  {sandbox &&
+                    " Deneme alanında turnuva geçmişi kopyalanmadığı için yeniden hesaplama kapalıdır."}
                 </p>
                 <button
                   className="button danger"
-                  disabled={saving}
+                  disabled={saving || sandbox}
+                  title={
+                    sandbox
+                      ? "Deneme alanında turnuva geçmişi kopyalanmadığı için yeniden hesaplama kapalıdır."
+                      : undefined
+                  }
                   onClick={async () => {
                     if (
                       confirm(

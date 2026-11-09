@@ -71,6 +71,27 @@
   border-color: #c7ab75 !important;
   color: var(--accent) !important;
 }
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.row-actions .icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.row-actions .icon-button.danger-icon:hover:not(:disabled) {
+  color: #a94b32;
+}
+.archived-row td {
+  opacity: 0.62;
+}
+.muted-pill {
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
 .sandbox-welcome {
   max-width: 760px;
   margin: 20px auto;

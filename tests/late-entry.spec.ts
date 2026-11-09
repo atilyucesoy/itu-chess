@@ -123,6 +123,7 @@ test("state polling validates ETags without crossing authentication or sandbox b
   });
   expect(ownerResponse.status()).toBe(200);
   const ownerTag = ownerResponse.headers().etag;
+  const club = await (await request.get("/api/state")).json();
   expect(
     (
       await request.get("/api/state", {
@@ -145,7 +146,10 @@ test("state polling validates ETags without crossing authentication or sandbox b
   expect(sandbox.status()).toBe(200);
   const sandboxData = await sandbox.json();
   expect(sandboxData.workspace).toBe("sandbox");
-  expect(sandboxData.state.players).toEqual([]);
+  // The disposable workspace mirrors the club roster on entry.
+  expect(sandboxData.state.players.map((p: { name: string }) => p.name)).toEqual(
+    club.state.players.map((p: { name: string }) => p.name),
+  );
   const sandboxTag = sandbox.headers().etag;
   await request.post("/api/action", {
     data: {

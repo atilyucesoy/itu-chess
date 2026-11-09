@@ -307,6 +307,7 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
     data: { username: "testowner", password: "test-password-12345" },
   });
   const before = await (await real.get("/api/backup")).json();
+  const club = await (await real.get("/api/state")).json();
   await page.goto("/#settings");
   await page.getByRole("button", { name: "Deneme ortamını aç" }).click();
   await expect(
@@ -314,7 +315,10 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
   ).toBeVisible();
   let current = await (await page.request.get("/api/state")).json();
   expect(current.workspace).toBe("sandbox");
-  expect(current.state.players).toEqual([]);
+  // The sandbox starts from a copy of the club roster, not an empty list.
+  expect(current.state.players.map((p: { id: string }) => p.id)).toEqual(
+    club.state.players.map((p: { id: string }) => p.id),
+  );
   const mutate = async (action: string, payload: object) => {
     const snapshot = await (await page.request.get("/api/state")).json();
     const response = await page.request.post("/api/action", {
@@ -342,7 +346,8 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
     .getByRole("button", { name: "Turnuva oluştur", exact: true })
     .click();
   await page.getByRole("button", { name: /abc deneme turnuvası/ }).click();
-  await page.getByRole("button", { name: "Tümünü seç" }).click();
+  await page.getByPlaceholder("Oyuncu ara…").fill("sandbox");
+  await page.getByRole("button", { name: "Görünenleri seç" }).click();
   await page.getByRole("button", { name: "2 oyuncuyu kaydet" }).click();
   await page.getByRole("button", { name: "1. turu eşlendir" }).click();
   await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
@@ -351,8 +356,12 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
     .click();
   await expect(page.getByText("TURNUVANIN PODYUMU")).toBeVisible();
   current = await (await page.request.get("/api/state")).json();
+  const sandboxRated = current.state.players.filter((p: { name: string }) =>
+    p.name.endsWith("-sandbox"),
+  );
+  expect(sandboxRated.length).toBe(2);
   expect(
-    current.state.players.every((p: { itu: number | null }) => p.itu !== null),
+    sandboxRated.every((p: { itu: number | null }) => p.itu !== null),
   ).toBeTruthy();
   await mutate("ratings.override", {
     playerId: current.state.players[0].id,
@@ -386,8 +395,12 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
     page.getByText("Deneme verileri tamamen temizlendi."),
   ).toBeVisible();
   const reset = await (await page.request.get("/api/state")).json();
-  for (const key of ["players", "tournaments", "overrides", "audit"])
+  for (const key of ["tournaments", "overrides", "audit"])
     expect(reset.state[key]).toEqual([]);
+  // A reset restores today's live roster instead of emptying the workspace.
+  expect(reset.state.players.map((p: { id: string }) => p.id)).toEqual(
+    club.state.players.map((p: { id: string }) => p.id),
+  );
   expect(reset.revision).toBeGreaterThan(current.revision);
   expect(
     (
@@ -446,4 +459,52 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
   ).toBe(409);
   expect(await (await real.get("/api/backup")).json()).toEqual(before);
   await real.dispose();
+});
+
+test("player archive and delete from the roster UI", async ({ page }) => {
+  await page.request.post("/api/login", {
+    data: { username: "testowner", password: "test-password-12345" },
+  });
+  let state = await (await page.request.get("/api/state")).json();
+  expect(
+    (
+      await page.request.post("/api/action", {
+        data: {
+          revision: state.revision,
+          action: "player.create",
+          payload: {
+            name: "Arşiv Testi",
+            official: 1700,
+            officialType: "ELO",
+          },
+        },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.goto("/#players");
+  await page.getByRole("button", { name: "Arşiv Testi arşivle" }).click();
+  // Archived players leave the default roster but stay recoverable.
+  await expect(
+    page.getByRole("button", { name: "Arşiv Testi arşivle" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Arşivlenenler (1)" }).click();
+  await expect(page.getByText("Arşivde", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/players-archive.png" });
+  await page.getByRole("button", { name: "Arşiv Testi arşivden çıkar" }).click();
+  await expect(page.getByText("Arşivde", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Arşivlenenler (1)" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Arşiv Testi sil" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Kalıcı olarak sil" })
+    .click();
+  await expect(page.getByRole("button", { name: "Arşiv Testi sil" })).toHaveCount(
+    0,
+  );
+  state = await (await page.request.get("/api/state")).json();
+  expect(
+    state.state.players.some((p: { name: string }) => p.name === "Arşiv Testi"),
+  ).toBe(false);
 });

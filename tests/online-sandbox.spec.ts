@@ -292,3 +292,92 @@ test("production: online sandbox still requires authentication and does not expo
   expect((await anonymous.get("/api/managers")).status()).toBe(403);
   await anonymous.dispose();
 });
+
+test("production: the sandbox starts from a copy of the club roster and leaves it untouched", async ({
+  playwright,
+}) => {
+  const owner = await ownerAndBoard(playwright);
+  const roster = [
+    ["Gerçek Bir", 1810],
+    ["Gerçek İki", 1620],
+  ] as const;
+  for (const [name, official] of roster) {
+    const snap = await (await owner.get("/api/state")).json();
+    const response = await owner.post("/api/action", {
+      data: {
+        revision: snap.revision,
+        action: "player.create",
+        payload: { name, official, officialType: "ELO" },
+      },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+  }
+  let state = await (await owner.get("/api/state")).json();
+  const liveIds = state.state.players.map((p: { id: string }) => p.id);
+  expect(liveIds.length).toBe(2);
+  const live = await (await owner.get("/api/backup")).json();
+
+  for (const client of [owner]) {
+    const entered = await client.post("/api/sandbox/enter", {
+      data: { confirm: true },
+    });
+    expect(entered.ok(), await entered.text()).toBeTruthy();
+  }
+  state = await (await owner.get("/api/state")).json();
+  expect(state.workspace).toBe("sandbox");
+  expect(state.state.players.map((p: { name: string }) => p.name)).toEqual([
+    "Gerçek Bir",
+    "Gerçek İki",
+  ]);
+  expect(state.state.players[0].official).toBe(1810);
+  expect(state.state.players[0].itu).toBeNull();
+  expect(state.state.tournaments).toEqual([]);
+
+  const [first, second] = state.state.players;
+  await mutate(owner, "player.update", {
+    id: first.id,
+    name: "Deneme Bir",
+    official: 2400,
+    officialType: "ELO",
+  });
+  await mutate(owner, "player.archive", { id: second.id, archived: true });
+  // Replaying history that was never copied would wipe every rating.
+  const snapshot = await (await owner.get("/api/state")).json();
+  const recalculate = await owner.post("/api/action", {
+    data: {
+      revision: snapshot.revision,
+      workspace: "sandbox",
+      action: "ratings.recalculate",
+      payload: { confirm: true },
+    },
+  });
+  expect(recalculate.status()).toBe(400);
+  // The archived player never played a real event, so a hard delete is allowed.
+  await mutate(owner, "player.delete", { id: second.id });
+  state = await (await owner.get("/api/state")).json();
+  expect(state.state.players.map((p: { name: string }) => p.name)).toEqual([
+    "Deneme Bir",
+  ]);
+  expect(state.state.players[0].official).toBe(2400);
+
+  await owner.post("/api/sandbox/exit", { data: {} });
+  expect(await (await owner.get("/api/backup")).json()).toEqual(live);
+  state = await (await owner.get("/api/state")).json();
+  expect(state.state.players.map((p: { name: string }) => p.name)).toEqual([
+    "Gerçek Bir",
+    "Gerçek İki",
+  ]);
+  expect(state.state.players[0].official).toBe(1810);
+
+  for (const id of liveIds) {
+    const snap = await (await owner.get("/api/state")).json();
+    const removed = await owner.post("/api/action", {
+      data: { revision: snap.revision, action: "player.delete", payload: { id } },
+    });
+    expect(removed.ok(), await removed.text()).toBeTruthy();
+  }
+  expect((await (await owner.get("/api/state")).json()).state.players).toEqual(
+    [],
+  );
+  await owner.dispose();
+});
