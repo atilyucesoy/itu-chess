@@ -6,6 +6,7 @@ export default defineConfig({
     "presentation.spec.ts",
     "late-entry.spec.ts",
     "online-sandbox.spec.ts",
+    "rating-draft-ui.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

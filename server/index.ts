@@ -118,7 +118,13 @@ async function context(req: express.Request) {
   );
   const token = sandboxToken(req.headers.cookie);
   if (!token)
-    return { ...live, user, activeStore: store, workspace: "club" as const };
+    return {
+      ...live,
+      user,
+      activeStore: store,
+      ratingBaseline: undefined,
+      workspace: "club" as const,
+    };
   // A stale sandbox cookie NEVER falls back to real club records.
   const memory =
     canUseSandbox(user?.role, onlineSandboxAvailable, developerAvailable) &&
@@ -131,12 +137,14 @@ async function context(req: express.Request) {
       state: emptyState(),
       user,
       activeStore: null,
+      ratingBaseline: undefined,
       workspace: "expired" as const,
     };
   return {
     ...(await memory.load()),
     user,
     activeStore: memory,
+    ratingBaseline: memory.ratingBaseline(),
     workspace: "sandbox" as const,
   };
 }
@@ -379,7 +387,8 @@ app.post("/api/action", async (req, res) => {
       payload: z.record(z.string(), z.unknown()),
     })
     .parse(req.body);
-  const { revision, state, user, activeStore, workspace } = await context(req);
+  const { revision, state, user, activeStore, workspace, ratingBaseline } =
+    await context(req);
   if (!user) {
     res.status(401).json({ error: "Yönetici girişi gerekli." });
     return;
@@ -403,9 +412,8 @@ app.post("/api/action", async (req, res) => {
     });
     return;
   }
-  // The sandbox copies the roster and its current ratings, but not tournament
-  // history. A replay would therefore reset every rating to null and look like
-  // data loss, so this one action stays club-only.
+  // Full-club history recalculation stays club-only. Sandbox finalization and
+  // local corrections replay only local events over its frozen rating baseline.
   if (workspace === "sandbox" && input.action === "ratings.recalculate") {
     res.status(400).json({
       error:
@@ -465,6 +473,7 @@ app.post("/api/action", async (req, res) => {
       input.action,
       input.payload,
       user.role === "owner",
+      ratingBaseline,
     );
   state.audit.unshift({
     at: new Date().toISOString(),

@@ -4,6 +4,9 @@ export interface Policy {
   provisionalGames: number;
   provisionalK: number;
   establishedK: number;
+  // Missing on legacy event snapshots = disabled, preserving past calculations.
+  initialPerformanceCapEnabled?: boolean;
+  initialPerformanceCap?: number;
 }
 export const DEFAULT_POLICY: Policy = {
   reference: 1500,
@@ -11,6 +14,8 @@ export const DEFAULT_POLICY: Policy = {
   provisionalGames: 30,
   provisionalK: 40,
   establishedK: 20,
+  initialPerformanceCapEnabled: false,
+  initialPerformanceCap: 1900,
 };
 export const F1 = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 export type Result =

@@ -61,6 +61,7 @@ import { standings, championship } from "../shared/standings";
 import SemesterSettings from "./components/SemesterSettings";
 import AppearanceSettings from "./components/AppearanceSettings";
 import Projection from "./components/Projection";
+import RatingPolicyForm from "./components/RatingPolicyForm";
 import LateEntryForm from "./components/LateEntryForm";
 
 type Page =
@@ -426,6 +427,25 @@ export default function App() {
       ),
     });
   }
+  function createTournamentPlayer(t: Tournament, selectedIds: string[]) {
+    setModal({
+      title: "Yeni oyuncu oluştur ve ekle",
+      content: (
+        <PlayerForm
+          onSave={async (newPlayer) => {
+            if (
+              await action(
+                "tournament.playerCreate",
+                { tournamentId: t.id, playerIds: selectedIds, newPlayer },
+                "Oyuncu kaydedildi ve turnuvaya eklendi",
+              )
+            )
+              setModal(null);
+          }}
+        />
+      ),
+    });
+  }
   function archivePlayer(player: Player) {
     const rest = player.archivedAt ? "arşivden çıkarıldı" : "arşivlendi";
     return action(
@@ -440,8 +460,8 @@ export default function App() {
       content: (
         <div>
           <p>
-            <strong>{player.name}</strong> kayıtlı oyunculardan tamamen
-            silinsin mi?
+            <strong>{player.name}</strong> kayıtlı oyunculardan tamamen silinsin
+            mi?
           </p>
           <p className="muted">
             Bu işlem geri alınamaz. Bir turnuvada oynamış ya da manuel rating
@@ -465,10 +485,7 @@ export default function App() {
               <Trash2 size={16} />
               Kalıcı olarak sil
             </button>
-            <button
-              className="button secondary"
-              onClick={() => setModal(null)}
-            >
+            <button className="button secondary" onClick={() => setModal(null)}>
               Vazgeç
             </button>
           </div>
@@ -751,8 +768,8 @@ export default function App() {
                   <ul>
                     <li>
                       Mevcut kulüp kadrosunun bir kopyası ve boş bir turnuva
-                      alanı açılır. Aynı ortak hesapla farklı cihazlarda
-                      yapılan denemeler birbirinden ayrıdır.
+                      alanı açılır. Aynı ortak hesapla farklı cihazlarda yapılan
+                      denemeler birbirinden ayrıdır.
                     </li>
                     <li>
                       Oyuncu ekleyip silebilir, ratingleri değiştirebilirsin;
@@ -761,8 +778,8 @@ export default function App() {
                     </li>
                     <li>
                       Denemeyi sıfırlayınca veya alandan çıkınca bu oyuncular,
-                      turnuvalar, puanlar ve işlem kayıtları temizlenir;
-                      kadro bugünkü gerçek hâline döner.
+                      turnuvalar, puanlar ve işlem kayıtları temizlenir; kadro
+                      bugünkü gerçek hâline döner.
                     </li>
                     <li>
                       Sunucu yeniden başlarsa/uyursa ya da dört saatlik oturum
@@ -1208,7 +1225,9 @@ export default function App() {
                               <td>{p.games}</td>
                               <td>
                                 {p.archivedAt ? (
-                                  <span className="pill muted-pill">Arşivde</span>
+                                  <span className="pill muted-pill">
+                                    Arşivde
+                                  </span>
                                 ) : (
                                   <span className="pill">
                                     {p.itu === null
@@ -1414,6 +1433,7 @@ export default function App() {
                       openPlayer={openPlayer}
                       notify={notify}
                       onLateEntry={() => lateEntry(t)}
+                      onNewPlayer={(ids) => createTournamentPlayer(t, ids)}
                       onEdit={() =>
                         setModal({
                           title: "Turnuva ayarları",
@@ -1834,6 +1854,7 @@ function TournamentDesk({
   openPlayer,
   notify,
   onLateEntry,
+  onNewPlayer,
   onEdit,
 }: {
   t: Tournament;
@@ -1845,6 +1866,7 @@ function TournamentDesk({
   openPlayer: (id: string) => void;
   notify: (s: string, e?: boolean) => void;
   onLateEntry: () => void;
+  onNewPlayer: (ids: string[]) => void;
   onEdit: () => void;
 }) {
   const [tab, setTab] = useState(
@@ -2340,8 +2362,12 @@ function TournamentDesk({
           <ParticipantPicker
             key={t.entries.map((e) => e.playerId).join(",")}
             t={t}
-            players={state.players.filter((p) => !p.archivedAt)}
+            players={state.players.filter(
+              (p) =>
+                !p.archivedAt || t.entries.some((e) => e.playerId === p.id),
+            )}
             last={lastTournament}
+            onNewPlayer={onNewPlayer}
             onSave={(ids) =>
               action("tournament.entries", {
                 tournamentId: t.id,
@@ -2479,6 +2505,13 @@ function TournamentDesk({
               </dd>
               <dt>Yerleşik rating</dt>
               <dd>K={t.policy.establishedK}</dd>
+              <dt>İlk performans üst sınırı</dt>
+              <dd>
+                {t.policy.initialMethod === "performance" &&
+                t.policy.initialPerformanceCapEnabled
+                  ? (t.policy.initialPerformanceCap ?? 1900)
+                  : "Kapalı"}
+              </dd>
             </dl>
             <p className="footnote">
               Politika turnuva başlangıcında kaydedilir. Byeler ve hükmen
@@ -2559,11 +2592,13 @@ function ParticipantPicker({
   players,
   last,
   onSave,
+  onNewPlayer,
 }: {
   t: Tournament;
   players: Player[];
   last?: Tournament;
   onSave: (ids: string[]) => Promise<boolean>;
+  onNewPlayer: (ids: string[]) => void;
 }) {
   const [selected, setSelected] = useState(
     new Set(t.entries.map((e) => e.playerId)),
@@ -2590,11 +2625,29 @@ function ParticipantPicker({
           placeholder="Oyuncu ara…"
         />
         <div className="button-group">
+          <button
+            className="button secondary small"
+            disabled={saving || selected.size >= 200}
+            onClick={() => onNewPlayer([...selected])}
+          >
+            <Plus size={16} />
+            Yeni oyuncu oluştur ve ekle
+          </button>
           {last && (
             <button
               className="button secondary small"
               onClick={() =>
-                setSelected(new Set(last.entries.map((e) => e.playerId)))
+                setSelected(
+                  new Set(
+                    last.entries
+                      .filter((e) =>
+                        players.some(
+                          (p) => p.id === e.playerId && !p.archivedAt,
+                        ),
+                      )
+                      .map((e) => e.playerId),
+                  ),
+                )
               }
             >
               <Copy size={14} />
@@ -2645,6 +2698,7 @@ function ParticipantPicker({
               <span className="avatar">{p.name[0]}</span>
               <span>
                 <strong>{p.name}</strong>
+                {p.archivedAt && <small>Arşivli · mevcut katılımcı</small>}
                 <Rating
                   itu={p.itu}
                   official={p.official}
@@ -2655,17 +2709,9 @@ function ParticipantPicker({
           ))}
       </div>
       {!players.length && (
-        <Empty
-          title="Kayıtlı oyuncu yok"
-          action={
-            <a className="button secondary" href="#players">
-              Oyunculara git
-              <ArrowRight size={16} />
-            </a>
-          }
-        >
-          Oyuncular sekmesine eklediğin kişiler her haftanın turnuvasında tekrar
-          seçilebilir.
+        <Empty title="Kayıtlı oyuncu yok">
+          Üstteki yeni oyuncu düğmesiyle burada oluşturup doğrudan turnuvaya
+          ekleyebilirsiniz. Oyuncu genel listeye de kaydedilir.
         </Empty>
       )}
       <div className="picker-footer">
@@ -2896,84 +2942,12 @@ function SettingsPage({
         <section className="card padded">
           <h2>İTÜ Elo politikası</h2>
           <p className="muted">Kulüp içinde karar verdikçe değiştirilebilir.</p>
-          <form
+          <RatingPolicyForm
             key={JSON.stringify(state.policy)}
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setSaving(true);
-              const d = new FormData(e.currentTarget);
-              await action("policy.save", {
-                reference: Number(d.get("reference")),
-                initialMethod: d.get("initialMethod"),
-                provisionalGames: Number(d.get("provisionalGames")),
-                provisionalK: Number(d.get("provisionalK")),
-                establishedK: Number(d.get("establishedK")),
-              });
-              setSaving(false);
-            }}
-          >
-            <fieldset disabled={!owner || saving}>
-              <Field label="Derecesiz oyuncular için başlangıç referansı">
-                <input
-                  type="number"
-                  required
-                  name="reference"
-                  min={100}
-                  max={3500}
-                  defaultValue={state.policy.reference}
-                />
-              </Field>
-              <Field label="Derecesiz oyuncunun ilk İTÜ Elo’su">
-                <select
-                  name="initialMethod"
-                  defaultValue={state.policy.initialMethod}
-                >
-                  <option value="performance">
-                    İlk turnuvadaki performanstan
-                  </option>
-                  <option value="seed">
-                    Başlangıç referansı + Elo değişimi
-                  </option>
-                </select>
-              </Field>
-              <Field label="Geçici rating süresi (oynanan maç)">
-                <input
-                  required
-                  name="provisionalGames"
-                  type="number"
-                  min={0}
-                  max={200}
-                  defaultValue={state.policy.provisionalGames}
-                />
-              </Field>
-              <div className="form-row">
-                <Field label="Geçici K katsayısı">
-                  <input
-                    name="provisionalK"
-                    required
-                    type="number"
-                    min={1}
-                    max={100}
-                    defaultValue={state.policy.provisionalK}
-                  />
-                </Field>
-                <Field label="Yerleşik K katsayısı">
-                  <input
-                    name="establishedK"
-                    required
-                    type="number"
-                    min={1}
-                    max={100}
-                    defaultValue={state.policy.establishedK}
-                  />
-                </Field>
-              </div>
-              <button className="button" disabled={!owner || saving}>
-                <Check size={16} />
-                Politikayı kaydet
-              </button>
-            </fieldset>
-          </form>
+            policy={state.policy}
+            owner={owner}
+            onSave={(policy) => action("policy.save", policy)}
+          />
           <div className="info-box">
             <ShieldCheck size={19} />
             <p>
@@ -3185,6 +3159,7 @@ function auditLabel(action: string) {
         "player.update": "Oyuncu düzenlendi",
         "tournament.create": "Turnuva oluşturuldu",
         "tournament.entries": "Katılımcılar kaydedildi",
+        "tournament.playerCreate": "Oyuncu oluşturulup turnuvaya eklendi",
         "tournament.lateEntry": "Geç katılım eklendi",
         "round.generate": "Tur eşlendirildi",
         "round.result": "Maç sonucu kaydedildi",

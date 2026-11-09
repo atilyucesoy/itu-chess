@@ -22,6 +22,7 @@ export const backupSchema = z
           itu: rating,
           games: z.number().int().nonnegative(),
           createdAt: z.iso.datetime(),
+          archivedAt: z.iso.datetime().optional(),
         }),
       ),
       managers: z

@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { expected } from "../shared/ratings";
 type RequestFactory = { request: typeof import("@playwright/test").request };
 
 const base = "https://127.0.0.1:3100";
@@ -372,12 +373,121 @@ test("production: the sandbox starts from a copy of the club roster and leaves i
   for (const id of liveIds) {
     const snap = await (await owner.get("/api/state")).json();
     const removed = await owner.post("/api/action", {
-      data: { revision: snap.revision, action: "player.delete", payload: { id } },
+      data: {
+        revision: snap.revision,
+        action: "player.delete",
+        payload: { id },
+      },
     });
     expect(removed.ok(), await removed.text()).toBeTruthy();
   }
   expect((await (await owner.get("/api/state")).json()).state.players).toEqual(
     [],
   );
+  await owner.dispose();
+});
+
+test("production HTTPS: seeded ITU ratings survive sandbox finalization and nonparticipants keep their values", async ({
+  playwright,
+}) => {
+  const owner = await ownerAndBoard(playwright);
+  const write = async (action: string, payload: object) => {
+    const s = await (await owner.get("/api/state")).json();
+    const r = await owner.post("/api/action", {
+      data: { revision: s.revision, workspace: "club", action, payload },
+    });
+    expect(r.ok(), await r.text()).toBeTruthy();
+  };
+  for (const name of ["Baseline One", "Baseline Two", "Baseline Untouched"])
+    await write("player.create", { name, official: 1800, officialType: "ELO" });
+  let state = await (await owner.get("/api/state")).json();
+  const ids = state.state.players
+    .filter((p: { name: string }) => p.name.startsWith("Baseline "))
+    .map((p: { id: string }) => p.id);
+  await write("ratings.override", {
+    playerId: ids[2],
+    value: 2150,
+    reason: "Fixture baseline",
+  });
+  await write("tournament.create", {
+    name: "Isolated primary fixture",
+    date: "2026-11-09",
+    roundsPlanned: 1,
+    timeControl: "3+2",
+    countsPoints: true,
+    countsRating: true,
+  });
+  state = await (await owner.get("/api/state")).json();
+  let t = state.state.tournaments.find(
+    (t: { name: string }) => t.name === "Isolated primary fixture",
+  );
+  await write("tournament.entries", {
+    tournamentId: t.id,
+    playerIds: ids.slice(0, 2),
+  });
+  await write("round.generate", { tournamentId: t.id });
+  await write("round.result", {
+    tournamentId: t.id,
+    round: 1,
+    board: 1,
+    result: "1-0",
+  });
+  await write("tournament.finalize", { tournamentId: t.id });
+  const before = await (await owner.get("/api/backup")).json();
+  const inherited = before.state.players.filter((p: { id: string }) =>
+    ids.includes(p.id),
+  );
+  expect(
+    inherited
+      .slice(0, 2)
+      .map((p: { itu: number }) => p.itu)
+      .sort((a: number, b: number) => a - b),
+  ).toEqual([1780, 1820]);
+  await owner.post("/api/sandbox/enter", { data: { confirm: true } });
+  await mutate(owner, "tournament.create", {
+    name: "Seeded rating exercise",
+    date: "2026-11-09",
+    roundsPlanned: 1,
+    timeControl: "3+2",
+    countsPoints: true,
+    countsRating: true,
+  });
+  state = await (await owner.get("/api/state")).json();
+  t = state.state.tournaments[0];
+  await mutate(owner, "tournament.entries", {
+    tournamentId: t.id,
+    playerIds: ids.slice(0, 2),
+  });
+  await mutate(owner, "round.generate", { tournamentId: t.id });
+  await mutate(owner, "round.result", {
+    tournamentId: t.id,
+    round: 1,
+    board: 1,
+    result: "1/2",
+  });
+  await mutate(owner, "tournament.lots", { tournamentId: t.id, confirm: true });
+  await mutate(owner, "tournament.finalize", { tournamentId: t.id });
+  state = await (await owner.get("/api/state")).json();
+  expect(state.state.ratingBaseline).toBeUndefined();
+  for (let i = 0; i < 2; i++) {
+    const p = inherited[i],
+      other = inherited[1 - i],
+      after = state.state.players.find((p2: { id: string }) => p2.id === p.id);
+    expect(after.itu).toBe(
+      Math.round(p.itu + 40 * (0.5 - expected(p.itu, other.itu))),
+    );
+    expect(after.games).toBe(p.games + 1);
+  }
+  expect(
+    state.state.players.find((p: { id: string }) => p.id === ids[2]),
+  ).toEqual(inherited[2]);
+  await owner.post("/api/sandbox/reset", {
+    data: { confirm: true, revision: state.revision },
+  });
+  state = await (await owner.get("/api/state")).json();
+  expect(state.state.players).toEqual(before.state.players);
+  expect(state.state.tournaments).toEqual([]);
+  await owner.post("/api/sandbox/exit", { data: {} });
+  expect(await (await owner.get("/api/backup")).json()).toEqual(before);
   await owner.dispose();
 });

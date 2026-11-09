@@ -7,7 +7,7 @@ import {
   type Result,
 } from "../shared/types.js";
 import { standings } from "../shared/standings.js";
-import { rebuildRatings } from "../shared/ratings.js";
+import { rebuildRatings, type RatingBaseline } from "../shared/ratings.js";
 import { pair } from "./engine.js";
 function seedOrder(t: Tournament) {
   t.entries.sort(
@@ -28,6 +28,8 @@ export const policySchema = z.object({
   provisionalGames: z.number().int().min(0).max(200),
   provisionalK: z.number().int().min(1).max(100),
   establishedK: z.number().int().min(1).max(100),
+  initialPerformanceCapEnabled: z.boolean().default(false),
+  initialPerformanceCap: rating.default(1900),
 });
 const playerSchema = z.object({
   name: text,
@@ -74,6 +76,7 @@ export async function applyAction(
   action: string,
   payload: unknown,
   owner: boolean,
+  ratingBaseline?: RatingBaseline,
 ) {
   const p = payload as Record<string, unknown>;
   if (action === "semester.create") {
@@ -159,7 +162,9 @@ export async function applyAction(
       !events.length,
       `Bu oyuncu ${events
         .map((t) => `"${t.name}"`)
-        .join(", ")} turnuvasında yer alıyor. Geçmiş bozulmasın diye silinemez; arşivleyin.`,
+        .join(
+          ", ",
+        )} turnuvasında yer alıyor. Geçmiş bozulmasın diye silinemez; arşivleyin.`,
     );
     requireThat(
       !state.overrides.some((o) => o.playerId === player.id),
@@ -170,7 +175,7 @@ export async function applyAction(
   }
   if (action === "policy.save") {
     requireThat(owner, "Bu işlem kulüp yöneticisine açık.");
-    state.policy = policySchema.parse(p);
+    state.policy = policySchema.parse({ ...state.policy, ...p });
     return;
   }
   if (action === "ratings.recalculate") {
@@ -182,7 +187,7 @@ export async function applyAction(
       !state.tournaments.some((t) => t.status === "live" && t.countsRating),
       "Önce Elo’ya dahil devam eden turnuvayı bitirin.",
     );
-    rebuildRatings(state, state.policy);
+    rebuildRatings(state, state.policy, ratingBaseline);
     return;
   }
   if (action === "ratings.override") {
@@ -203,7 +208,7 @@ export async function applyAction(
       id: randomUUID(),
       at: nextEventTime(state),
     });
-    rebuildRatings(state);
+    rebuildRatings(state, undefined, ratingBaseline);
     return;
   }
   if (action === "tournament.create") {
@@ -231,6 +236,63 @@ export async function applyAction(
   }
   const t = state.tournaments.find((t) => t.id === p.tournamentId);
   requireThat(t, "Turnuva bulunamadı.");
+  if (action === "tournament.playerCreate") {
+    requireThat(
+      t.status === "draft" && t.rounds.length === 0,
+      "İlk tur eşlendirildikten sonra geç katılımı kullanın.",
+    );
+    const input = z
+      .object({
+        newPlayer: playerSchema,
+        playerIds: z.array(z.string()).max(199),
+      })
+      .parse(p);
+    requireThat(
+      new Set(input.playerIds).size === input.playerIds.length,
+      "Aynı oyuncu iki kez eklenemez.",
+    );
+    requireThat(
+      !state.players.some(
+        (player) =>
+          player.name.toLocaleLowerCase("tr") ===
+          input.newPlayer.name.toLocaleLowerCase("tr"),
+      ),
+      "Bu isim zaten kayıtlı. Kayıtlı oyuncuyu seçin veya arşivden geri alın.",
+    );
+    const registered = new Set(t.entries.map((e) => e.playerId));
+    const selected = input.playerIds.map((id) => {
+      const player = state.players.find((p) => p.id === id);
+      requireThat(player, "Oyuncu bulunamadı.");
+      requireThat(
+        !player.archivedAt || registered.has(id),
+        "Arşivli oyuncular yeni bir kadroya eklenemez. Önce arşivden geri alın.",
+      );
+      return player;
+    });
+    const player = {
+      ...input.newPlayer,
+      id: randomUUID(),
+      itu: null,
+      games: 0,
+      createdAt: new Date().toISOString(),
+    };
+    const entries = [...selected, player].map((p) => ({
+      playerId: p.id,
+      name: p.name,
+      official: p.official,
+      officialType: p.officialType,
+      itu: p.itu,
+      seed: effectiveRating(p, state.policy.reference),
+      number: 0,
+      withdrawn: false,
+      joinedRound: 1,
+    }));
+    // Registry + participant list are saved together by the outer CAS. A failure
+    // above cannot leave an orphan profile or discard the user's unsaved picks.
+    state.players.push(player);
+    t.entries = entries;
+    return;
+  }
   if (action === "tournament.lateEntry") {
     requireThat(
       t.status === "live",
@@ -262,6 +324,10 @@ export async function applyAction(
     const players = input.playerIds.map((id) => {
       const player = state.players.find((p) => p.id === id);
       requireThat(player, "Oyuncu bulunamadı.");
+      requireThat(
+        !player.archivedAt,
+        "Arşivli oyuncular geç katılıma eklenemez. Önce arşivden geri alın.",
+      );
       requireThat(
         !t.entries.some((e) => e.playerId === id),
         "Seçilen oyuncu zaten bu turnuvada kayıtlı.",
@@ -330,9 +396,14 @@ export async function applyAction(
       new Set(ids).size === ids.length,
       "Aynı oyuncu iki kez eklenemez.",
     );
+    const registered = new Set(t.entries.map((e) => e.playerId));
     t.entries = ids.map((id) => {
       const player = state.players.find((x) => x.id === id);
       requireThat(player, "Oyuncu bulunamadı.");
+      requireThat(
+        !player.archivedAt || registered.has(id),
+        "Arşivli oyuncular yeni bir kadroya eklenemez. Önce arşivden geri alın.",
+      );
       return {
         playerId: id,
         name: player.name,
@@ -477,7 +548,7 @@ export async function applyAction(
     );
     t.status = "finished";
     t.finalizedAt = nextEventTime(state);
-    rebuildRatings(state);
+    rebuildRatings(state, undefined, ratingBaseline);
     return;
   }
   if (action === "tournament.reopen") {
@@ -500,7 +571,7 @@ export async function applyAction(
     t.status = "live";
     t.finalizedAt = null;
     t.ratingChanges = [];
-    rebuildRatings(state);
+    rebuildRatings(state, undefined, ratingBaseline);
     return;
   }
   throw new Error("Bilinmeyen işlem.");

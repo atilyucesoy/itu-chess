@@ -18,11 +18,23 @@ export function initialPerformance(opponents: number[], score: number) {
       400 * Math.log10((score + 0.5) / (n - score + 0.5)),
   );
 }
-export function rebuildRatings(state: State, replacePolicy?: Policy) {
+export type RatingBaseline = ReadonlyMap<
+  string,
+  Readonly<{ rating: number | null; games: number }>
+>;
+
+export function rebuildRatings(
+  state: State,
+  replacePolicy?: Policy,
+  baseline?: RatingBaseline,
+) {
   const ratings = new Map(
     state.players.map((p) => [
       p.id,
-      { rating: null as number | null, games: 0 },
+      {
+        rating: baseline?.get(p.id)?.rating ?? null,
+        games: baseline?.get(p.id)?.games ?? 0,
+      },
     ]),
   );
   const events: (
@@ -73,6 +85,11 @@ export function rebuildRatings(state: State, replacePolicy?: Policy) {
           policy.initialMethod === "performance"
         ) {
           current.rating = initialPerformance(opponents, score);
+          if (policy.initialPerformanceCapEnabled)
+            current.rating = Math.min(
+              current.rating,
+              policy.initialPerformanceCap ?? 1900,
+            );
         } else {
           const start = starts.get(e.playerId)!;
           const delta = games.reduce(

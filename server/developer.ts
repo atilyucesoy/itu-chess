@@ -1,10 +1,7 @@
 import { randomBytes } from "node:crypto";
-import {
-  emptyState,
-  type Snapshot,
-  type State,
-} from "../shared/types.js";
+import { emptyState, type Snapshot, type State } from "../shared/types.js";
 import type { Store } from "./store.js";
+import type { RatingBaseline } from "../shared/ratings.js";
 // The sandbox starts from a copy of the club roster so that pairing and rating
 // behaviour can be exercised with realistic values. Managers, events,
 // overrides and the audit trail are deliberately NOT copied: they are the
@@ -50,11 +47,22 @@ export class MemorySandboxStore implements Store {
   private state: State;
   private revision = 0;
   private closed = false;
+  private baseline: RatingBaseline;
   constructor(
     seed: SandboxSeed,
     private maxBytes = 2 * 1024 * 1024,
   ) {
     this.state = seededState(seed);
+    this.baseline = this.captureBaseline(seed);
+  }
+  private captureBaseline(seed: SandboxSeed): RatingBaseline {
+    return new Map(
+      seed.players.map((p) => [p.id, { rating: p.itu, games: p.games }]),
+    );
+  }
+  // Internal replay context, never part of State or an HTTP/backup payload.
+  ratingBaseline(): RatingBaseline {
+    return structuredClone(this.baseline);
   }
   async load(): Promise<Snapshot> {
     return { revision: this.revision, state: structuredClone(this.state) };
@@ -73,11 +81,13 @@ export class MemorySandboxStore implements Store {
     if (this.closed || (expected !== undefined && expected !== this.revision))
       return false;
     this.state = seededState(seed);
+    this.baseline = this.captureBaseline(seed);
     this.revision++;
     return true;
   }
   dispose() {
     this.state = emptyState();
+    this.baseline = new Map();
     this.closed = true;
   }
 }
