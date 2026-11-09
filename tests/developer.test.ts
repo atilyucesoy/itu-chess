@@ -5,6 +5,8 @@ import {
   MemorySandboxStore,
   SandboxRegistry,
   developerModeEnabled,
+  onlineSandboxEnabled,
+  canUseSandbox,
   sandboxToken,
 } from "../server/developer.js";
 
@@ -24,6 +26,29 @@ test("developer mode is explicit and always disabled in production", () => {
     }),
     false,
   );
+});
+test("the narrow online sandbox admits both manager roles without enabling production developer mode", () => {
+  const env = { NODE_ENV: "production", ENABLE_DEVELOPER_MODE: "1" };
+  assert.equal(developerModeEnabled(env), false);
+  assert.equal(onlineSandboxEnabled(env), true);
+  assert.equal(canUseSandbox("owner", true, false), true);
+  assert.equal(canUseSandbox("organizer", true, false), true);
+  assert.equal(canUseSandbox(undefined, true, false), false);
+  assert.equal(onlineSandboxEnabled({ ENABLE_ONLINE_SANDBOX: "0" }), false);
+  assert.equal(canUseSandbox("organizer", false, false), false);
+  assert.equal(canUseSandbox("owner", false, false), false);
+  assert.equal(canUseSandbox("owner", false, true), true);
+});
+test("oversized sandbox states are rejected without persisting the attempted mutation", async () => {
+  const store = new MemorySandboxStore(DEFAULT_POLICY, undefined, 1000);
+  const before = await store.load();
+  before.state.audit.push({ action: "x".repeat(1500), by: "test", at: "now" });
+  await assert.rejects(
+    () => store.save(before.state, before.revision),
+    /boyut sınırına/,
+  );
+  assert.deepEqual((await store.load()).state.audit, []);
+  assert.equal((await store.load()).revision, before.revision);
 });
 test("memory sandbox loads independent copies and rejects stale writes after reset", async () => {
   const store = new MemorySandboxStore(DEFAULT_POLICY);
@@ -55,7 +80,7 @@ test("discarding a sandbox invalidates in-flight saves and drops all state", asy
   assert.equal(await store.save(before.state, before.revision), false);
   assert.deepEqual((await store.load()).state.audit, []);
 });
-test("sandbox sessions are owner-bound, independently isolated, expiring and disposable", async () => {
+test("sandbox sessions are manager-bound, independently isolated, expiring and disposable", async () => {
   let now = 100;
   const registry = new SandboxRegistry(() => now, 1000);
   const a = registry.create("owner-a", DEFAULT_POLICY);

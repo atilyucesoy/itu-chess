@@ -19,12 +19,15 @@ import { emptyState, type Manager, type State } from "../shared/types.js";
 import { migrateState } from "../shared/migrate.js";
 import {
   developerModeEnabled,
+  onlineSandboxEnabled,
+  canUseSandbox,
   SandboxRegistry,
   sandboxToken,
 } from "./developer.js";
 const production = process.env.NODE_ENV === "production";
 const store = cachedStore(createStore());
 const developerAvailable = developerModeEnabled();
+const onlineSandboxAvailable = onlineSandboxEnabled();
 const sandboxes = new SandboxRegistry();
 const cleanupTimer = setInterval(() => sandboxes.cleanup(), 60_000);
 cleanupTimer.unref();
@@ -118,7 +121,8 @@ async function context(req: express.Request) {
     return { ...live, user, activeStore: store, workspace: "club" as const };
   // A stale sandbox cookie NEVER falls back to real club records.
   const memory =
-    developerAvailable && user?.role === "owner"
+    canUseSandbox(user?.role, onlineSandboxAvailable, developerAvailable) &&
+    user
       ? sandboxes.resolve(token, user.id)
       : null;
   if (!memory)
@@ -139,10 +143,10 @@ async function context(req: express.Request) {
 function clearSandbox(
   req: express.Request,
   res: express.Response,
-  ownerId?: string,
+  managerId?: string,
 ) {
   const token = sandboxToken(req.headers.cookie);
-  if (token && ownerId) sandboxes.drop(token, ownerId);
+  if (token && managerId) sandboxes.drop(token, managerId);
   res.clearCookie("itu_sandbox", {
     path: "/",
     httpOnly: true,
@@ -170,6 +174,7 @@ app.get("/api/health", (_req, res) =>
     engine: ENGINE_VERSION,
     engineInstalled: existsSync(enginePath()),
     engineReady: true,
+    onlineSandboxEnabled: onlineSandboxAvailable,
     storage: process.env.SUPABASE_URL ? "supabase" : "sqlite",
   }),
 );
@@ -183,6 +188,11 @@ app.get("/api/state", async (req, res) => {
     user: safeUser(user),
     workspace,
     developerAvailable: developerAvailable && user?.role === "owner",
+    sandboxAvailable: canUseSandbox(
+      user?.role,
+      onlineSandboxAvailable,
+      developerAvailable,
+    ),
   });
   // Hash the complete, permission-filtered response: anonymous, authenticated,
   // sandbox and expired-workspace representations cannot share a stale tag.
@@ -195,9 +205,14 @@ app.get("/api/state", async (req, res) => {
   }
   res.type("application/json").send(body);
 });
-app.post("/api/developer/enter", async (req, res) => {
-  if (!developerAvailable) {
-    res.status(404).json({ error: "Developer mode bu sunucuda kapalı." });
+app.post(["/api/sandbox/enter", "/api/developer/enter"], async (req, res) => {
+  const legacy = req.path.startsWith("/api/developer/");
+  if (
+    legacy
+      ? !developerAvailable
+      : !(onlineSandboxAvailable || developerAvailable)
+  ) {
+    res.status(404).json({ error: "Deneme alanı bu sunucuda kapalı." });
     return;
   }
   const live = await store.load();
@@ -206,8 +221,18 @@ app.post("/api/developer/enter", async (req, res) => {
     live.state.managers,
     sessionSecret,
   );
-  if (user?.role !== "owner") {
-    res.status(403).json({ error: "Kulüp yöneticisi yetkisi gerekli." });
+  if (!user) {
+    res
+      .status(401)
+      .json({ error: "Deneme alanı için yönetici girişi gerekli." });
+    return;
+  }
+  if (
+    legacy
+      ? user.role !== "owner"
+      : !canUseSandbox(user.role, onlineSandboxAvailable, developerAvailable)
+  ) {
+    res.status(403).json({ error: "Deneme alanı yetkisi gerekli." });
     return;
   }
   if (req.body.confirm !== true) {
@@ -221,18 +246,35 @@ app.post("/api/developer/enter", async (req, res) => {
   res.cookie("itu_sandbox", token, {
     httpOnly: true,
     sameSite: "strict",
-    secure: false,
+    secure: production,
     path: "/",
   });
   res.json({ ok: true });
 });
-app.post("/api/developer/reset", async (req, res) => {
-  if (!developerAvailable) {
-    res.status(404).json({ error: "Developer mode kapalı." });
+app.post(["/api/sandbox/reset", "/api/developer/reset"], async (req, res) => {
+  const legacy = req.path.startsWith("/api/developer/");
+  if (
+    legacy
+      ? !developerAvailable
+      : !(onlineSandboxAvailable || developerAvailable)
+  ) {
+    res.status(404).json({ error: "Deneme alanı kapalı." });
     return;
   }
   const ctx = await context(req);
-  if (ctx.user?.role !== "owner") {
+  if (!ctx.user) {
+    res.status(401).json({ error: "Yönetici girişi gerekli." });
+    return;
+  }
+  if (
+    legacy
+      ? ctx.user.role !== "owner"
+      : !canUseSandbox(
+          ctx.user.role,
+          onlineSandboxAvailable,
+          developerAvailable,
+        )
+  ) {
     res.status(403).json({ error: "Yetkisiz." });
     return;
   }
@@ -266,7 +308,7 @@ app.post("/api/developer/reset", async (req, res) => {
   }
   res.json({ ok: true });
 });
-app.post("/api/developer/exit", async (req, res) => {
+app.post(["/api/sandbox/exit", "/api/developer/exit"], async (req, res) => {
   const live = await store.load();
   const user = authenticate(
     req.headers.cookie,
@@ -278,7 +320,12 @@ app.post("/api/developer/exit", async (req, res) => {
 });
 app.post(
   "/api/login",
-  rateLimit({ windowMs: 15 * 60_000, limit: 15, legacyHeaders: false }),
+  rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 15,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+  }),
   async (req, res) => {
     const input = z
       .object({ username: z.string().max(80), password: z.string().max(200) })
@@ -493,6 +540,8 @@ app.use(
   },
 );
 const port = Number(process.env.PORT ?? 3001);
-app.listen(port, production ? "0.0.0.0" : "127.0.0.1", () =>
-  console.log(`İTÜ Satranç: http://127.0.0.1:${port}`),
+app.listen(
+  port,
+  process.env.HOST ?? (production ? "0.0.0.0" : "127.0.0.1"),
+  () => console.log(`İTÜ Satranç: http://127.0.0.1:${port}`),
 );

@@ -18,13 +18,33 @@ export function developerModeEnabled(env: NodeJS.ProcessEnv = process.env) {
   return env.NODE_ENV !== "production" && env.ENABLE_DEVELOPER_MODE === "1";
 }
 
+// This is a narrow, authenticated, disposable workspace feature, NOT a switch
+// that enables development behavior or anonymous access in production.
+export function onlineSandboxEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return env.ENABLE_ONLINE_SANDBOX !== "0";
+}
+export function canUseSandbox(
+  role: "owner" | "organizer" | undefined,
+  online: boolean,
+  developer: boolean,
+) {
+  return (
+    (online && (role === "owner" || role === "organizer")) ||
+    (developer && role === "owner")
+  );
+}
+
 // Never writes to SQLite, Supabase, backups or the production audit trail.
 // Revisions stay monotonic across resets, so in-flight requests cannot revive data.
 export class MemorySandboxStore implements Store {
   private state: State;
   private revision = 0;
   private closed = false;
-  constructor(policy: Policy, periods?: Periods) {
+  constructor(
+    policy: Policy,
+    periods?: Periods,
+    private maxBytes = 2 * 1024 * 1024,
+  ) {
     this.state = {
       ...emptyState(),
       ...(periods ? periodConfig(periods) : {}),
@@ -36,6 +56,10 @@ export class MemorySandboxStore implements Store {
   }
   async save(state: State, expected: number) {
     if (this.closed || expected !== this.revision) return false;
+    if (Buffer.byteLength(JSON.stringify(state), "utf8") > this.maxBytes)
+      throw new Error(
+        "Deneme alanı boyut sınırına ulaştı. Denemeyi sıfırlayıp tekrar deneyin.",
+      );
     this.state = structuredClone(state);
     this.revision++;
     return true;
@@ -60,13 +84,13 @@ export class MemorySandboxStore implements Store {
 export class SandboxRegistry {
   private sessions = new Map<
     string,
-    { ownerId: string; expires: number; store: MemorySandboxStore }
+    { managerId: string; expires: number; store: MemorySandboxStore }
   >();
   constructor(
     private now: () => number = Date.now,
     private ttl = 4 * 60 * 60_000,
   ) {}
-  create(ownerId: string, policy: Policy, periods?: Periods) {
+  create(managerId: string, policy: Policy, periods?: Periods) {
     this.cleanup();
     if (this.sessions.size >= 20)
       throw new Error(
@@ -75,20 +99,20 @@ export class SandboxRegistry {
     const token = randomBytes(32).toString("hex");
     const store = new MemorySandboxStore(policy, periods);
     this.sessions.set(token, {
-      ownerId,
+      managerId,
       expires: this.now() + this.ttl,
       store,
     });
     return token;
   }
-  resolve(token: string, ownerId: string) {
+  resolve(token: string, managerId: string) {
     this.cleanup();
     const session = this.sessions.get(token);
-    return session?.ownerId === ownerId ? session.store : null;
+    return session?.managerId === managerId ? session.store : null;
   }
-  drop(token: string, ownerId: string) {
+  drop(token: string, managerId: string) {
     const session = this.sessions.get(token);
-    if (session?.ownerId !== ownerId) return;
+    if (session?.managerId !== managerId) return;
     session.store.dispose();
     this.sessions.delete(token);
   }

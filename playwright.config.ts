@@ -1,7 +1,12 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
-  testMatch: ["browser.spec.ts", "presentation.spec.ts", "late-entry.spec.ts"],
+  testMatch: [
+    "browser.spec.ts",
+    "presentation.spec.ts",
+    "late-entry.spec.ts",
+    "online-sandbox.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   timeout: 60000,
@@ -11,10 +16,19 @@ export default defineConfig({
     trace: "retain-on-failure",
     viewport: { width: 1440, height: 1000 },
   },
-  webServer: {
-    command: "node --import tsx scripts/test-server.ts",
-    url: "http://127.0.0.1:3099/api/health",
-    reuseExistingServer: false,
-    timeout: 30000,
-  },
+  webServer: [
+    {
+      command: "node --import tsx scripts/test-server.ts",
+      url: "http://127.0.0.1:3099/api/health",
+      reuseExistingServer: false,
+      timeout: 30000,
+    },
+    {
+      command: "node --import tsx scripts/test-server.ts --production",
+      url: "https://127.0.0.1:3100/api/health",
+      ignoreHTTPSErrors: true,
+      reuseExistingServer: false,
+      timeout: 30000,
+    },
+  ],
 });
