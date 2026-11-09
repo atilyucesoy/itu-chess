@@ -29,28 +29,29 @@ Open **http://localhost:5173**. Setup prints the unique initial owner password a
 
 Local database: `data/club.sqlite`. Do not delete it or store it on an ephemeral hosted disk. The site starts empty: no invented players or results are mixed with real club data.
 
-## Developer mode: disposable test tournaments
+## Online disposable test area
 
-`npm run dev` enables developer mode on the local server. Sign in as the owner, open **Kulüp ayarları → Developer mode → Deneme ortamını aç**. A persistent yellow banner identifies the test workspace. Add names such as `abc`, create a tournament, enter results and finalize normally.
+Open **[itu-chess.onrender.com/#sandbox](https://itu-chess.onrender.com/#sandbox)**, sign in with an owner or organizer account and start a test workspace. It is also available through the header and **Kulüp ayarları → Deneme alanı**. The yellow **DENEME ALANI** banner distinguishes it from real club records.
 
-- The test workspace starts empty and copies **only rating policy and semester configuration**, never actual players, tournaments or accounts.
-- All test state lives in an isolated **in-memory store**, not the club's SQLite/Supabase database. It does not enter real rating history, points, audit records or backups.
-- **Denemeyi sıfırla** clears all test players, events, rating changes, corrections and audit entries. **Kulüp kayıtlarına dön** clears and discards the test workspace before returning to actual club data.
-- Test state is also discarded on logout, server restart or after four hours. An expired workspace never silently accepts mutations against actual club records. Explicit workspace checks and monotonic revisions reject stale requests.
-- Only the owner can enter developer mode. Account management and full backups are disabled inside a test workspace.
-- Developer mode requires `ENABLE_DEVELOPER_MODE=1` and is **always disabled when `NODE_ENV=production`**, even if that flag is set. The bundled `dev` script sets the flag; a normal `npm start` does not.
-- Test CSV/TRF files you explicitly download are outside the workspace and are not removed from your computer by reset. Memory disposal is an application-level isolation guarantee, not a forensic secure-erasure guarantee for operating-system memory or external logs.
+- Each browser gets an independent in-memory workspace, even when friends share one board organizer account. It begins with a deep copy of the current roster, ratings, played-game counts, rating policy and semester settings. Actual tournaments, manager accounts, corrections and audit history are not copied.
+- A private immutable **rating baseline** retains copied İTÜ Elo and game counts. Finalization, reopening and local corrections replay test events over that baseline, not over zero. Nonparticipants keep their copied rating; new test players still use normal first-rating rules. This context is never stored in the club JSON, exported in a backup or accepted from an API payload.
+- Test actions never update the real club's SQLite/Supabase record, ratings, championship points or audit. **Denemeyi sıfırla** discards test changes and reloads today's roster/configuration; **Kulüp kayıtlarına dön** discards the workspace. Logout, restart/sleep and the four-hour TTL can also discard it. There is a 2 MB state limit and a 20-session global limit.
+- Account management and full backups stay disabled in a workspace. Full real-history rating recalculation stays club-only, since the real tournament ledger is not copied.
+- `ENABLE_ONLINE_SANDBOX=0` disables the online feature; otherwise it is available to authenticated managers. This narrow feature does **not** enable development settings in production. `ENABLE_DEVELOPER_MODE=1` and `/api/developer/*` remain local owner-only legacy access.
+- Test event links are private to that browser session. Share the `/#sandbox` entrance link, not a disposable event ID. Explicitly downloaded CSV/TRF files are not removed from your computer by reset. Memory disposal is an application-level guarantee, not forensic secure erasure of operating-system memory or external logs.
 
 Tabs in the same browser share the workspace cookie. Use a separate browser profile if you need to view actual club records and a test workspace simultaneously. The automated browser test verifies that a complete test tournament, reset and exit leave the actual club backup **unchanged**, including its revision.
 
 ## Weekly workflow
 
-1. Sign in, add people in **Oyuncular**, with optional FIDE standard Elo or UKD.
+1. Sign in, add people in **Oyuncular**, with optional FIDE standard Elo or UKD. Before the first pairing, you can instead use **Yeni oyuncu oluştur ve ekle** in the tournament's participant picker: it saves a global profile and selects them in this event atomically, preserving your other unsaved picks.
 2. Create a standard chess event. Defaults: **7 rounds**, **3+2**, and the club's active semester. Choose a registered semester and whether the event contributes championship points and/or İTÜ Elo. There is no variant/mode selection.
 3. Select existing players, or copy the most recent tournament's participant list. **Save the list** before generating the first round.
 4. Generate a round; enter wins, draws or forfeits. All results must be complete before pairing the next round.
 5. Between rounds, mark withdrawals/returns from **Oyuncular**. Withdrawn players receive explicit zero-point absences, not rating losses. For a later arrival use **Geç katılım ekle**; select registered players or create a new one directly.
 6. After the planned final round, resolve any complete tie with a **recorded random lot**, then finalize. Finalization awards points and updates ratings once. It cannot be run twice.
+
+Archived players are excluded from new roster picks, copying a previous tournament and late admission. A player already registered before archival stays visible/marked in that event so archiving cannot silently change an existing roster or history. Archive flags survive backup restoration. Duplicate-name, stale-revision or validation failures during inline creation cannot leave an orphan player profile.
 
 The total rounds can be changed **before starting**, not silently changed mid-event. First-round initial colour is randomly drawn once and stored. If the engine cannot create valid pairings, it reports failure; it never falls back to an improvised pairing algorithm. For very small fields, choose a feasible number of Swiss rounds before starting.
 
@@ -84,6 +85,7 @@ Defaults, editable by the owner:
 
 - Unrated reference: **1500**. It's a temporary seed, not an initial displayed İTÜ Elo.
 - Unrated first rating: `mean(opponent starting ratings) + 400 × log10((score + 0.5)/(games − score + 0.5))`. This club estimator is smoothed for zero/perfect results and can produce a high first rating.
+- Optional **İlk performans ratingine üst sınır uygula** and editable **İlk rating üst sınırı** (example/default value 1900). It starts **off** to preserve existing policy. When enabled, only the first performance-based rating of a player with neither official nor established İTÜ Elo is capped: `min(estimate, limit)`. Lower estimates are unchanged. Official-rating starts, the alternative seeded initial method, manual corrections and later rating gains are not capped. Existing event snapshots with no cap fields keep the old behavior; saving a new policy never silently recalculates old events.
 - Alternative initial method: reference + ordinary Elo change.
 - Players with official ratings start from those, applying Elo change, not from zero.
 - K=40 for the first 30 played rated games, K=20 afterwards. Transition can happen within a tournament; expected scores always use frozen starting values.
@@ -149,7 +151,7 @@ npx playwright install chromium
 npm run test:e2e        # isolated temporary database, never real club data
 ```
 
-Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts. Developer-mode tests cover owner-only access, production gating, memory disposal, reset races, expired-session handling and unchanged real club data. Further tests cover late-entry admission and missed rounds, published-round integrity, safe semester migration/rollover, old backup compatibility, brown-only dark-mode persistence, a 40-player projection at 1080p, live round updates, native fullscreen, smaller-screen pagination, cache invalidation and authentication-aware conditional polling. GitHub Actions runs the unit/integration tests and browser tests on pushes to `main` and pull requests.
+Tests include full seven-round even/odd tournaments, no repeated played opponents, colours, byes, forfeits, withdrawal/return, seeding priority, first-rated and unrated initialization, policy replay, finalization/reopening, tie resolution, semester exclusions, private data, permissions and edit conflicts. Sandbox tests run in production mode behind a generated TLS proxy with an isolated database: owner/organizer access, independent shared-account browsers, seeded rating/game-count preservation, reset/exit and unchanged real fixture backups. Further tests cover a 32-player 7/7 first-rating cap followed by normal growth in a second event, cap toggling/snapshot compatibility, atomic inline draft registration, archived-roster filtering/backup metadata, late-entry admission, semester migration, projections, cache invalidation and conditional polling. GitHub Actions runs the source-built engine tests and browser suite on pushes and pull requests.
 
 ## Pairing rules and licensing
 

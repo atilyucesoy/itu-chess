@@ -14,7 +14,7 @@ Express server ───────► bbpPairings 6.0.0 process
           ├── actual club: SQLite or private Supabase Postgres
           │                 versioned state + compare-and-swap save
           │
-          └── developer sandbox: owner-bound, in-memory state
+          └── online test area: manager/browser-bound, in-memory state
                                  no persistent writes
 ```
 
@@ -39,6 +39,8 @@ Official Elo/UKD is manually maintained and never modified by club game results.
 Byes and unplayed forfeits are excluded from rating updates. Ratings are computed after finalization using frozen event-start rating values. This avoids order-dependent per-result updates while results are being entered.
 
 Completed rated events and owner corrections form a timestamped replay history. An explicit owner action can recalculate ratings under a changed policy without rewriting old pairings or standings snapshots. Only one rated event can be live at a time, preventing simultaneous events from committing incompatible rating histories.
+
+An optional, disabled-by-default first-performance cap is part of the policy snapshot. It applies only when the player has no previous İTÜ rating, no official rating and the selected initial method is performance estimation. It is not a lifelong rating ceiling. Missing fields in historical snapshots behave as disabled; old backup policies parse with compatible defaults. Owner saves merge new policy fields with current settings so older clients cannot silently erase an enabled cap.
 
 ## Standings and semester points
 
@@ -69,9 +71,13 @@ Late entrants have an explicit first eligible round. Their missing pre-entry rou
 
 Finalization cannot be repeated. Corrections to earlier rounds require explicitly undoing subsequent rounds; reopening older rated events is restricted when later rated events remain finalized. These constraints favor reproducible history over unrestricted editing.
 
-## Disposable developer workspaces
+## Disposable online workspaces
 
-Developer mode is opt-in and hard-disabled in production. An owner can open an empty in-memory workspace using the current rating policy and semester configuration. It copies no actual players or accounts.
+Authenticated owners and organizers can open separate in-memory test areas, including in production. This uses `ENABLE_ONLINE_SANDBOX` (enabled unless explicitly set to 0), not the hard-disabled production developer flag. The roster, rating values/counts and configuration are copied, but not the original ledger or account credentials.
+
+The sandbox store captures an immutable replay baseline separately from its `State`. Request context supplies that trusted map to the domain's rating operations. Rebuild starts from inherited rating/game-count balances and replays only local test events and corrections. It never infers a baseline from current mutable player values, which would compound rating gains on each rebuild, and never injects fabricated corrections into permanent history. Reset refreshes the baseline from the current roster; disposal drops it. Full-club policy/history recalculation remains unavailable inside a test workspace.
+
+Draft inline player creation validates both the new profile and the current selected roster before changing either list; the outer CAS saves them together. New selections/copying reject archived profiles. Previously registered archived participants remain visible/marked and can be explicitly removed without silently rewriting existing participation.
 
 The server validates both the workspace cookie and the workspace identifier on every mutation. A missing/expired sandbox must not redirect a stale test write to the actual club. Reset increments the sandbox revision; disposal invalidates its store so in-flight saves cannot resurrect deleted test state.
 

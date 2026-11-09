@@ -87,7 +87,12 @@ Bu gizli değerleri bana göndermene gerek yok. `VITE_` ile başlayan değişken
 - İzlemeleri için Render adresini göndermen yeterli; oyuncuların hesap açması gerekmez.
 - Yönetmeleri için **Kulüp ayarları → Turnuva yöneticileri → Yeni yönetici ekle** üzerinden her kişiye ayrı hesap aç. Kendi owner şifreni gruba gönderme.
 - Public siteye yazdığın oyuncu isimleri ve ratingler herkese açık olur; kişisel telefon, öğrenci numarası vb. ekleme.
-- Yerel developer deneme alanı production'da kapalıdır. Online normal turnuvaya `abc` kayıtları girersen bunlar gerçek online veritabanına yazılır; silinebilir yerel denemeyle karıştırma.
+- Arkadaşlarına denemek için **https://itu-chess.onrender.com/#sandbox** bağlantısını gönder. Owner veya organizatör hesabıyla girip deneme alanını açabilirler; sarı banner görünmeden gerçek kayıtlarda rastgele turnuva oluşturmasınlar. Deneme alanı mevcut kadronun kopyasıyla başlar, kişiye/tarayıcıya özeldir; sıfırlama gerçek kadroyu değiştirmez. Geniş developer modu production'da yine kapalıdır. Online normal turnuvaya girilen kayıtlar ise kalıcıdır.
+
+### Yeni iki kolaylık
+
+- Owner hesabında **Kulüp ayarları → İTÜ Elo politikası → İlk performans ratingine üst sınır uygula** ile örneğin **1900** sınırını seçebilirsin. Başlangıçta kapalıdır. Yalnız resmî/İTÜ ratingi olmayan oyuncunun ilk performans hesabına uygulanır; sonradan 1900'ü aşmasını engellemez. Gerçek kulüp politikasını değiştirmek istiyorsan önce deneme alanından çık.
+- İlk tur eşlendirilmeden önce turnuva içindeki **Katılımcılar → Yeni oyuncu oluştur ve ekle** ile oyuncuyu hem genel listeye hem turnuvaya kaydedebilirsin; diğer seçili oyuncular korunur. İlk eşlendirme yapılmışsa geç katılımı kullan.
 
 ## Haftalık turnuvada ücretsiz plan sorun çıkarır mı?
 
