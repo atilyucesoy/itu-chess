@@ -35,6 +35,7 @@ import {
   Shuffle,
   Play,
   Maximize,
+  FlaskConical,
   Medal,
   ArrowRight,
   CheckCircle2,
@@ -66,6 +67,7 @@ type Page =
   | "championship"
   | "settings"
   | "tournament"
+  | "sandbox"
   | "projection";
 // Projection is a read-only route; it uses the same public data and polling.
 type Modal = { title: string; content: ReactNode } | null;
@@ -211,7 +213,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<"club" | "sandbox" | "expired">(
     "club",
   );
-  const [developerAvailable, setDeveloperAvailable] = useState(false);
+  const [sandboxAvailable, setSandboxAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
@@ -257,7 +259,7 @@ export default function App() {
     setRevision(data.revision);
     setUser(data.user);
     setWorkspace(data.workspace ?? "club");
-    setDeveloperAvailable(data.developerAvailable === true);
+    setSandboxAvailable(data.sandboxAvailable === true);
     setLoading(false);
   }, []);
   useEffect(() => {
@@ -335,7 +337,7 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function developerAction(kind: "enter" | "reset" | "exit") {
+  async function sandboxAction(kind: "enter" | "reset" | "exit") {
     if (busy) return;
     if (
       kind !== "enter" &&
@@ -348,7 +350,7 @@ export default function App() {
       return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/developer/${kind}`, {
+      const response = await fetch(`/api/sandbox/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: true, revision }),
@@ -497,6 +499,7 @@ export default function App() {
       tournaments: "Turnuvalar",
       tournament: "Turnuva masası",
       projection: "Projeksiyon",
+      sandbox: "Deneme alanı",
       players: "Oyuncular",
       championship: "Dönem sıralaması",
       settings: "Kulüp ayarları",
@@ -584,6 +587,18 @@ export default function App() {
             <strong>{title}</strong>
           </div>
           <div className="top-actions">
+            {user && sandboxAvailable && workspace === "club" && (
+              <button
+                className="button secondary small sandbox-launch"
+                aria-label="Deneme alanını aç"
+                title="Gerçek kayıtlardan ayrı bir deneme başlat"
+                disabled={busy}
+                onClick={() => sandboxAction("enter")}
+              >
+                <FlaskConical size={16} />
+                <span>Deneme alanı</span>
+              </button>
+            )}
             <span
               className="season-chip"
               title="Yeni turnuvalar için aktif dönem"
@@ -634,7 +649,7 @@ export default function App() {
               <strong>
                 {workspace === "expired"
                   ? "Deneme oturumu sona erdi"
-                  : "DEVELOPER MODE · DENEME ORTAMI"}
+                  : "DENEME ALANI · GERÇEK KAYITLARDAN AYRI"}
               </strong>
               <span>
                 {workspace === "expired"
@@ -647,7 +662,7 @@ export default function App() {
                 <button
                   className="button secondary small"
                   disabled={busy}
-                  onClick={() => developerAction("reset")}
+                  onClick={() => sandboxAction("reset")}
                 >
                   <RotateCcw size={14} />
                   Denemeyi sıfırla
@@ -656,7 +671,7 @@ export default function App() {
               <button
                 className="button secondary small"
                 disabled={busy}
-                onClick={() => developerAction("exit")}
+                onClick={() => sandboxAction("exit")}
               >
                 Kulüp kayıtlarına dön
               </button>
@@ -671,6 +686,55 @@ export default function App() {
             </div>
           ) : (
             <>
+              {page === "sandbox" && (
+                <section className="card padded sandbox-welcome">
+                  <FlaskConical size={32} />
+                  <h1>Deneme alanı</h1>
+                  <p>
+                    Turnuva oluşturmayı, eşlendirmeleri ve sonuç girişini gerçek
+                    kulüp kayıtlarını değiştirmeden deneyebilirsiniz.
+                  </p>
+                  <ul>
+                    <li>
+                      Bu tarayıcıya özel, boş bir oyuncu ve turnuva alanı
+                      açılır. Aynı ortak hesapla farklı cihazlarda yapılan
+                      denemeler birbirinden ayrıdır.
+                    </li>
+                    <li>
+                      Denemeyi sıfırlayınca veya alandan çıkınca bu oyuncular,
+                      turnuvalar, puanlar ve işlem kayıtları temizlenir.
+                    </li>
+                    <li>
+                      Sunucu yeniden başlarsa/uyursa ya da dört saatlik oturum
+                      süresi dolarsa denemeler kaybolabilir; kalıcı çalışma için
+                      kullanmayın.
+                    </li>
+                  </ul>
+                  {!user ? (
+                    <button className="button" onClick={login}>
+                      <LogIn size={16} />
+                      Denemek için yönetici girişi
+                    </button>
+                  ) : workspace === "sandbox" ? (
+                    <a className="button" href="#home">
+                      Denemeye devam et
+                    </a>
+                  ) : sandboxAvailable ? (
+                    <button
+                      className="button"
+                      disabled={busy}
+                      onClick={() => sandboxAction("enter")}
+                    >
+                      <FlaskConical size={16} />
+                      Yeni deneme başlat
+                    </button>
+                  ) : (
+                    <p className="form-error">
+                      Deneme alanı bu sunucuda kapalı.
+                    </p>
+                  )}
+                </section>
+              )}
               {page === "projection" && (
                 <Projection
                   tournament={state.tournaments.find((t) => t.id === id)}
@@ -1217,6 +1281,7 @@ export default function App() {
                       state={state}
                       user={user}
                       busy={busy}
+                      sandbox={workspace !== "club"}
                       action={action}
                       openPlayer={openPlayer}
                       notify={notify}
@@ -1259,9 +1324,9 @@ export default function App() {
                     user={user}
                     action={action}
                     revision={revision}
-                    developerAvailable={developerAvailable}
+                    sandboxAvailable={sandboxAvailable}
                     sandbox={workspace !== "club"}
-                    onEnterSandbox={() => developerAction("enter")}
+                    onEnterSandbox={() => sandboxAction("enter")}
                   />
                 ) : (
                   <Empty
@@ -1636,6 +1701,7 @@ function TournamentDesk({
   state,
   user,
   busy,
+  sandbox,
   action,
   openPlayer,
   notify,
@@ -1646,6 +1712,7 @@ function TournamentDesk({
   state: PublicState;
   user: SessionUser | null;
   busy: boolean;
+  sandbox: boolean;
   action: Action;
   openPlayer: (id: string) => void;
   notify: (s: string, e?: boolean) => void;
@@ -1717,6 +1784,12 @@ function TournamentDesk({
           )}
           <button
             className="button secondary small"
+            disabled={sandbox}
+            title={
+              sandbox
+                ? "Deneme turnuvası yalnız bu tarayıcıya özel ve geçicidir; bağlantı arkadaşlarınızda açılmaz. Paylaşılabilir turnuva için kulüp kayıtlarına dönün."
+                : undefined
+            }
             onClick={() => {
               navigator.clipboard
                 .writeText(location.href)
@@ -2634,7 +2707,7 @@ function SettingsPage({
   user,
   action,
   revision,
-  developerAvailable,
+  sandboxAvailable,
   sandbox,
   onEnterSandbox,
 }: {
@@ -2643,7 +2716,7 @@ function SettingsPage({
   user: SessionUser;
   action: Action;
   revision: number;
-  developerAvailable: boolean;
+  sandboxAvailable: boolean;
   sandbox: boolean;
   onEnterSandbox: () => void;
 }) {
@@ -2665,14 +2738,14 @@ function SettingsPage({
           <p>Rating politikası, yönetici hesapları ve verilerin.</p>
         </div>
       </div>
-      {owner && developerAvailable && !sandbox && (
+      {sandboxAvailable && !sandbox && (
         <section className="card padded developer-settings">
-          <h2>Developer mode</h2>
+          <h2>Deneme alanı</h2>
           <p className="muted">
-            Boş ve ayrı bir deneme alanı açar. Deneme verileri yalnız sunucu
-            belleğinde tutulur; sıfırlama, çıkış veya sunucu yeniden
-            başlatıldığında silinir. Gerçek oyuncular, turnuvalar ve ratingler
-            değişmez.
+            Bu tarayıcıya özel, boş ve ayrı bir deneme alanı açar. Deneme
+            verileri yalnız sunucu belleğinde tutulur; sıfırlama, çıkış veya
+            sunucu yeniden başlatıldığında silinir. Gerçek oyuncular, turnuvalar
+            ve ratingler değişmez. Yönetim kurulu hesabıyla da kullanılabilir.
           </p>
           <button className="button secondary" onClick={onEnterSandbox}>
             Deneme ortamını aç
