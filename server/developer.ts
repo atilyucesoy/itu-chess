@@ -1,16 +1,26 @@
 import { randomBytes } from "node:crypto";
 import {
   emptyState,
-  type Policy,
   type Snapshot,
   type State,
 } from "../shared/types.js";
 import type { Store } from "./store.js";
-type Periods = Pick<State, "semesters" | "activeSemester">;
-function periodConfig(config: Periods) {
+// The sandbox starts from a copy of the club roster so that pairing and rating
+// behaviour can be exercised with realistic values. Managers, events,
+// overrides and the audit trail are deliberately NOT copied: they are the
+// club's permanent record and cannot be replayed in a throwaway workspace.
+export type SandboxSeed = Pick<
+  State,
+  "policy" | "semesters" | "activeSemester" | "players"
+>;
+function seededState(seed: SandboxSeed): State {
   return {
-    semesters: [...config.semesters],
-    activeSemester: config.activeSemester,
+    ...emptyState(),
+    semesters: [...seed.semesters],
+    activeSemester: seed.activeSemester,
+    policy: structuredClone(seed.policy),
+    // Deep copy: editing a sandbox player must never touch live club records.
+    players: structuredClone(seed.players),
   };
 }
 
@@ -41,15 +51,10 @@ export class MemorySandboxStore implements Store {
   private revision = 0;
   private closed = false;
   constructor(
-    policy: Policy,
-    periods?: Periods,
+    seed: SandboxSeed,
     private maxBytes = 2 * 1024 * 1024,
   ) {
-    this.state = {
-      ...emptyState(),
-      ...(periods ? periodConfig(periods) : {}),
-      policy: structuredClone(policy),
-    };
+    this.state = seededState(seed);
   }
   async load(): Promise<Snapshot> {
     return { revision: this.revision, state: structuredClone(this.state) };
@@ -64,19 +69,15 @@ export class MemorySandboxStore implements Store {
     this.revision++;
     return true;
   }
-  reset(policy: Policy, expected?: number, periods?: Periods) {
+  reset(seed: SandboxSeed, expected?: number) {
     if (this.closed || (expected !== undefined && expected !== this.revision))
       return false;
-    this.state = {
-      ...emptyState(),
-      ...(periods ? periodConfig(periods) : {}),
-      policy: structuredClone(policy),
-    };
+    this.state = seededState(seed);
     this.revision++;
     return true;
   }
   dispose() {
-    this.reset(this.state.policy);
+    this.state = emptyState();
     this.closed = true;
   }
 }
@@ -90,14 +91,14 @@ export class SandboxRegistry {
     private now: () => number = Date.now,
     private ttl = 4 * 60 * 60_000,
   ) {}
-  create(managerId: string, policy: Policy, periods?: Periods) {
+  create(managerId: string, seed: SandboxSeed) {
     this.cleanup();
     if (this.sessions.size >= 20)
       throw new Error(
         "Çok fazla deneme oturumu açık. Kullanmadığınız oturumlardan çıkın.",
       );
     const token = randomBytes(32).toString("hex");
-    const store = new MemorySandboxStore(policy, periods);
+    const store = new MemorySandboxStore(seed);
     this.sessions.set(token, {
       managerId,
       expires: this.now() + this.ttl,

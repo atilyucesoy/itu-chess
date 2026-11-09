@@ -240,7 +240,7 @@ app.post(["/api/sandbox/enter", "/api/developer/enter"], async (req, res) => {
     return;
   }
   clearSandbox(req, res, user.id);
-  const token = sandboxes.create(user.id, live.state.policy, live.state);
+  const token = sandboxes.create(user.id, live.state);
   // Keep a session cookie after memory expiration: it identifies an expired
   // sandbox instead of silently routing the browser back to production data.
   res.cookie("itu_sandbox", token, {
@@ -300,7 +300,7 @@ app.post(["/api/sandbox/reset", "/api/developer/reset"], async (req, res) => {
     res.status(410).json({ error: "Deneme oturumu sona erdi." });
     return;
   }
-  if (!memory.reset(live.state.policy, ctx.revision, live.state)) {
+  if (!memory.reset(live.state, ctx.revision)) {
     res
       .status(409)
       .json({ error: "Deneme kayıtları değişti; tekrar deneyin." });
@@ -400,6 +400,16 @@ app.post("/api/action", async (req, res) => {
     res.status(409).json({
       error:
         "Başka bir yönetici değişiklik yaptı. Sayfa yenilendi; işlemi tekrar deneyin.",
+    });
+    return;
+  }
+  // The sandbox copies the roster and its current ratings, but not tournament
+  // history. A replay would therefore reset every rating to null and look like
+  // data loss, so this one action stays club-only.
+  if (workspace === "sandbox" && input.action === "ratings.recalculate") {
+    res.status(400).json({
+      error:
+        "Deneme alanında turnuva geçmişi kopyalanmadığı için ratingler yeniden hesaplanamaz. Örnek bir turnuva oynayarak deneyin.",
     });
     return;
   }

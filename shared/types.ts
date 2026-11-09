@@ -23,6 +23,9 @@ export interface Player {
   itu: number | null;
   games: number;
   createdAt: string;
+  // Archived players stay in every historical record and profile, but are no
+  // longer offered when picking participants. Absent = active.
+  archivedAt?: string;
 }
 export interface Entry {
   playerId: string;

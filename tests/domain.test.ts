@@ -468,3 +468,68 @@ test("password hashing, signed cookies, tamper resistance and revocation", () =>
     null,
   );
 });
+test("archiving a player keeps tournament history intact and is owner-only", async () => {
+  const { state, t } = await fixture(8, 3);
+  await finish(state, t);
+  const player = state.players[0];
+  const ratingBefore = player.itu;
+  await assert.rejects(
+    () => applyAction(state, "player.archive", { id: player.id, archived: true }, false),
+    /kulüp yöneticisi/,
+  );
+  await applyAction(state, "player.archive", { id: player.id, archived: true }, true);
+  assert.ok(player.archivedAt);
+  assert.equal(player.itu, ratingBefore);
+  assert.deepEqual(state.players, state.players.filter((p) => p.id !== player.id || p.archivedAt));
+  assert.ok(
+    standings(t).some((row) => row.playerId === player.id && row.name === player.name),
+  );
+  await applyAction(state, "player.archive", { id: player.id, archived: false }, true);
+  assert.equal(player.archivedAt, undefined);
+  assert.equal(rebuildRatings(state, DEFAULT_POLICY), undefined);
+});
+test("deleting a player is refused once tournament history or an override refers to them", async () => {
+  const { state, t } = await fixture(4, 2);
+  await finish(state, t);
+  const used = state.players[0];
+  await assert.rejects(
+    () => applyAction(state, "player.delete", { id: used.id }, true),
+    /Haftalık Yıldırım.*arşivleyin/s,
+  );
+  assert.equal(state.players.length, 4);
+  // A player who never entered an event leaves no dangling reference.
+  await applyAction(
+    state,
+    "player.create",
+    { name: "Yedek Oyuncu", official: 1700, officialType: "ELO" },
+    true,
+  );
+  const spare = state.players.find((p) => p.name === "Yedek Oyuncu")!;
+  await assert.rejects(
+    () => applyAction(state, "player.delete", { id: spare.id }, false),
+    /kulüp yöneticisi/,
+  );
+  await applyAction(state, "player.delete", { id: spare.id }, true);
+  assert.equal(state.players.length, 4);
+  assert.equal(state.players.some((p) => p.name === "Yedek Oyuncu"), false);
+  // Manual rating overrides also block a hard delete.
+  await applyAction(
+    state,
+    "player.create",
+    { name: "Düzeltmeli", official: 1600, officialType: "ELO" },
+    true,
+  );
+  const corrected = state.players.find((p) => p.name === "Düzeltmeli")!;
+  await applyAction(
+    state,
+    "ratings.override",
+    { playerId: corrected.id, value: 1750, reason: "test" },
+    true,
+  );
+  await assert.rejects(
+    () => applyAction(state, "player.delete", { id: corrected.id }, true),
+    /manuel rating düzeltmesi/,
+  );
+  assert.ok(state.players.some((p) => p.id === corrected.id));
+  assert.equal(rebuildRatings(state, DEFAULT_POLICY), undefined);
+});

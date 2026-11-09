@@ -131,7 +131,7 @@ test("legacy migration preserves labels and data, and is idempotent", async () =
   assert.deepEqual(legacy, before);
   assert.equal(migrateState(migrated), migrated);
 });
-test("sandbox copies only semester configuration and policy, and reset restores those without players", async () => {
+test("sandbox copies the roster with the semester configuration, and reset restores the live snapshot", async () => {
   const s = emptyState();
   await applyAction(
     s,
@@ -145,17 +145,23 @@ test("sandbox copies only semester configuration and policy, and reset restores 
     { name: "actual-player", official: 1800, officialType: "ELO" },
     true,
   );
-  const store = new MemorySandboxStore(s.policy, s);
+  const store = new MemorySandboxStore(s);
   let snapshot = await store.load();
   assert.deepEqual(snapshot.state.semesters, s.semesters);
   assert.equal(snapshot.state.activeSemester, "Test Bahar");
-  assert.deepEqual(snapshot.state.players, []);
+  assert.equal(snapshot.state.players.length, 1);
+  assert.equal(snapshot.state.players[0].name, "actual-player");
+  assert.equal(snapshot.state.players[0].official, 1800);
   snapshot.state.semesters.push("sandbox-only");
+  snapshot.state.players[0].official = 2200;
   await store.save(snapshot.state, snapshot.revision);
   assert.ok(!s.semesters.includes("sandbox-only"));
+  assert.equal(s.players[0].official, 1800);
   snapshot = await store.load();
-  store.reset(s.policy, snapshot.revision, s);
-  assert.deepEqual((await store.load()).state.semesters, s.semesters);
+  store.reset(s, snapshot.revision);
+  const after = await store.load();
+  assert.deepEqual(after.state.semesters, s.semesters);
+  assert.equal(after.state.players[0].official, 1800);
 });
 test("old backups remain restorable and new backups validate the semester registry", async () => {
   const s = emptyState();

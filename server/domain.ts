@@ -132,6 +132,42 @@ export async function applyAction(
     }
     return;
   }
+  if (action === "player.archive") {
+    requireThat(
+      owner,
+      "Oyuncu arşivini yalnız kulüp yöneticisi değiştirebilir.",
+    );
+    const input = z
+      .object({ id: z.string().min(1).max(80), archived: z.boolean() })
+      .parse(p);
+    const player = state.players.find((x) => x.id === input.id);
+    requireThat(player, "Oyuncu bulunamadı.");
+    player.archivedAt = input.archived ? new Date().toISOString() : undefined;
+    return;
+  }
+  if (action === "player.delete") {
+    requireThat(owner, "Oyuncu kaydını yalnız kulüp yöneticisi silebilir.");
+    const input = z.object({ id: z.string().min(1).max(80) }).parse(p);
+    const player = state.players.find((x) => x.id === input.id);
+    requireThat(player, "Oyuncu bulunamadı.");
+    // Ratings are replayed from tournament history, so a player who appears in
+    // any event can never be removed without corrupting that history.
+    const events = state.tournaments.filter((t) =>
+      t.entries.some((e) => e.playerId === player.id),
+    );
+    requireThat(
+      !events.length,
+      `Bu oyuncu ${events
+        .map((t) => `"${t.name}"`)
+        .join(", ")} turnuvasında yer alıyor. Geçmiş bozulmasın diye silinemez; arşivleyin.`,
+    );
+    requireThat(
+      !state.overrides.some((o) => o.playerId === player.id),
+      "Bu oyuncunun manuel rating düzeltmesi var. Silmek yerine arşivleyin.",
+    );
+    state.players.splice(state.players.indexOf(player), 1);
+    return;
+  }
   if (action === "policy.save") {
     requireThat(owner, "Bu işlem kulüp yöneticisine açık.");
     state.policy = policySchema.parse(p);
