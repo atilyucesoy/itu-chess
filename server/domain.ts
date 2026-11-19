@@ -463,6 +463,49 @@ export async function applyAction(
     t.lotOrder = [];
     return;
   }
+  if (action === "round.results.save") {
+    active(t);
+    const result = z.enum(["1-0", "0-1", "1/2", "+-", "-+", "--"]).nullable();
+    const input = z
+      .object({
+        round: z.number().int(),
+        changes: z
+          .array(
+            z.object({
+              board: z.number().int().positive(),
+              white: z.string(),
+              black: z.string(),
+              previous: result,
+              result,
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .parse(p);
+    requireThat(
+      input.round === t.rounds.length,
+      "Sonuçlar yalnız güncel tur için kaydedilebilir.",
+    );
+    const seen = new Set<number>();
+    const updates = input.changes.map((change) => {
+      requireThat(!seen.has(change.board), "Bir masa iki kez gönderildi.");
+      seen.add(change.board);
+      const game = t.rounds.at(-1)?.games.find((g) => g.board === change.board);
+      requireThat(
+        game && game.white === change.white && game.black === change.black,
+        `Masa ${change.board} eşlendirmesi değişti. Güncel turu kontrol edin.`,
+      );
+      requireThat(
+        game.result === change.previous || game.result === change.result,
+        `Masa ${change.board} sonucu başka bir yönetici tarafından değiştirildi. Güncel sonucu kontrol edin.`,
+      );
+      return { game, result: change.result };
+    });
+    for (const update of updates) update.game.result = update.result;
+    t.lotOrder = [];
+    return;
+  }
   if (action === "round.result") {
     active(t);
     const input = z

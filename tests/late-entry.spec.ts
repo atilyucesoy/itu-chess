@@ -85,6 +85,9 @@ test("organizer adds a registered player and a new player without changing the c
   ).toBe(17);
   await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
   await page
+    .getByRole("button", { name: "Sonuçları kaydet", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "2. turu eşlendir", exact: true })
     .click();
   await expect(
@@ -147,9 +150,9 @@ test("state polling validates ETags without crossing authentication or sandbox b
   const sandboxData = await sandbox.json();
   expect(sandboxData.workspace).toBe("sandbox");
   // The disposable workspace mirrors the club roster on entry.
-  expect(sandboxData.state.players.map((p: { name: string }) => p.name)).toEqual(
-    club.state.players.map((p: { name: string }) => p.name),
-  );
+  expect(
+    sandboxData.state.players.map((p: { name: string }) => p.name),
+  ).toEqual(club.state.players.map((p: { name: string }) => p.name));
   const sandboxTag = sandbox.headers().etag;
   await request.post("/api/action", {
     data: {

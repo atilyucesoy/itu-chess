@@ -1,12 +1,5 @@
-import { useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  Maximize,
-  Minimize,
-  RefreshCw,
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Maximize, Minimize, RefreshCw } from "lucide-react";
 import type { Entry, Game, Tournament } from "../../shared/types";
 
 function score(result: Game["result"]) {
@@ -25,18 +18,18 @@ function score(result: Game["result"]) {
     )[result ?? ""] ?? "—"
   );
 }
-function Player({ entry, color }: { entry: Entry; color: "white" | "black" }) {
+function Player({ entry, fontSize }: { entry: Entry; fontSize: number }) {
   return (
-    <div className={`projection-player ${color}`}>
-      <strong className="projection-name">{entry.name}</strong>
-      <div className="projection-ratings">
-        <b>
-          <small>İTÜ</small> {entry.itu ?? "—"}
-        </b>
+    <div className="projection-player">
+      <span className="projection-name" style={{ fontSize }}>
+        {entry.name}
+      </span>
+      <span className="projection-ratings">
+        <span>İTÜ {entry.itu ?? "—"}</span>
         <span>
           {entry.officialType} {entry.official ?? "—"}
         </span>
-      </div>
+      </span>
     </div>
   );
 }
@@ -45,25 +38,32 @@ export default function Projection({
   tournament: t,
   sandbox,
   expired,
+  disconnected,
+  refreshing,
+  lastChecked,
   onRefresh,
 }: {
   tournament?: Tournament;
   sandbox: boolean;
   expired: boolean;
+  disconnected: boolean;
+  refreshing: boolean;
+  lastChecked: Date | null;
   onRefresh: () => void;
 }) {
-  const [size, setSize] = useState({ width: innerWidth, height: innerHeight });
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [grid, setGrid] = useState({
+    width: 0,
+    height: 0,
+    names: new Map<string, number>(),
+  });
   const [fullscreen, setFullscreen] = useState(!!document.fullscreenElement);
   const [selection, setSelection] = useState("latest");
-  const [page, setPage] = useState(0);
   const [fullscreenError, setFullscreenError] = useState("");
   useEffect(() => {
-    const resize = () => setSize({ width: innerWidth, height: innerHeight });
     const change = () => setFullscreen(!!document.fullscreenElement);
-    window.addEventListener("resize", resize);
     document.addEventListener("fullscreenchange", change);
     return () => {
-      window.removeEventListener("resize", resize);
       document.removeEventListener("fullscreenchange", change);
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
@@ -72,36 +72,77 @@ export default function Projection({
     selection === "latest"
       ? t?.rounds.at(-1)
       : t?.rounds.find((r) => r.number === Number(selection));
-  useEffect(() => {
-    setPage(0);
-  }, [round?.number]);
   const games = [...(round?.games ?? [])]
     .filter((g) => g.board > 0)
     .sort((a, b) => a.board - b.board);
-  const columns = size.width >= 1000 && games.length > 10 ? 2 : 1;
-  const longestName = Math.max(
-    0,
-    ...(t?.entries.map((e) => e.name.length) ?? []),
+  const hasGames = games.length > 0;
+  const entries = t?.entries;
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!hasGames || !el) return;
+    let active = true;
+    const canvas = document.createElement("canvas").getContext("2d");
+    function measure() {
+      if (!active || !el) return;
+      const names = new Map<string, number>();
+      if (canvas) canvas.font = `550 100px ${getComputedStyle(el).fontFamily}`;
+      for (const entry of entries ?? []) {
+        names.set(
+          entry.playerId,
+          (canvas?.measureText(entry.name).width ?? entry.name.length * 55) /
+            100,
+        );
+      }
+      setGrid({ width: el.clientWidth, height: el.clientHeight, names });
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    void document.fonts.ready.then(measure);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [entries, hasGames]);
+  const nameWidths = games
+    .flatMap((g) => [g.white, g.black])
+    .map((id) => (id && grid.names.get(id)) || 10)
+    .sort((a, b) => a - b);
+  const typicalNameWidth =
+    nameWidths[Math.floor(nameWidths.length * 0.8)] ?? 10;
+  const width = grid.width || 320;
+  const height = grid.height || 540;
+  const maxColumns = Math.min(
+    6,
+    Math.max(1, Math.floor(width / 280)),
+    games.length || 1,
   );
-  const rowHeight = longestName > 64 ? 158 : longestName > 34 ? 108 : 88;
-  const rows = Math.max(
-    2,
+  let layout = {
+    columns: 1,
+    rows: Math.max(1, games.length),
+    nameWidth: 1,
+    fontSize: 0,
+  };
+  for (let columns = 1; columns <= maxColumns; columns++) {
+    const rows = Math.max(1, Math.ceil(games.length / columns));
+    const columnWidth = (width - (columns - 1) * 18) / columns;
+    const nameWidth = (columnWidth * 0.77 - 22) / 2;
+    const rowHeight = (height - 18 - rows * 3) / rows;
+    const fontSize = Math.max(
+      3,
+      Math.min(26, rowHeight * 0.5, nameWidth / typicalNameWidth),
+    );
+    if (fontSize > layout.fontSize)
+      layout = { columns, rows, nameWidth, fontSize };
+  }
+  const groups = Array.from({ length: layout.columns }, (_, i) =>
+    games.slice(i * layout.rows, (i + 1) * layout.rows),
+  );
+  const fitName = (id: string) =>
     Math.min(
-      10,
-      Math.floor((size.height - (size.width < 700 ? 255 : 170)) / rowHeight),
-    ),
-  );
-  const capacity = columns * rows;
-  const pages = Math.max(1, Math.ceil(games.length / capacity));
-  const visiblePage = Math.min(page, pages - 1);
-  const visible = games.slice(
-    visiblePage * capacity,
-    (visiblePage + 1) * capacity,
-  );
-  const half = Math.ceil(visible.length / columns);
-  const groups = Array.from({ length: columns }, (_, i) =>
-    visible.slice(i * half, (i + 1) * half),
-  );
+      layout.fontSize,
+      layout.nameWidth / (grid.names.get(id) || typicalNameWidth),
+    );
   const byId = new Map(t?.entries.map((e) => [e.playerId, e]) ?? []);
   async function toggleFullscreen() {
     try {
@@ -144,6 +185,7 @@ export default function Projection({
           <button
             className="button secondary small"
             onClick={onRefresh}
+            disabled={refreshing}
             aria-label="Eşlendirmeleri yenile"
           >
             <RefreshCw size={15} />
@@ -160,7 +202,14 @@ export default function Projection({
         </p>
       )}
       <div className="projection-legend">
-        <span>İTÜ Elo · Resmî Elo/UKD</span>
+        <span
+          className={disconnected ? "projection-disconnected" : undefined}
+          role="status"
+        >
+          {disconnected
+            ? "Bağlantı kesildi. Son görülen eşlendirmeler."
+            : "İTÜ Elo ve resmî rating"}
+        </span>
         <select
           aria-label="Projeksiyon turu"
           value={selection}
@@ -176,15 +225,19 @@ export default function Projection({
       </div>
       {games.length ? (
         <div
+          ref={gridRef}
           className="projection-columns"
-          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+          style={{
+            gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
+            fontSize: layout.fontSize,
+          }}
         >
           {groups.map((group, i) => (
             <div
               className="projection-column"
               key={i}
               style={{
-                gridTemplateRows: `22px repeat(${Math.max(1, half)}, minmax(0, 1fr))`,
+                gridTemplateRows: `18px repeat(${layout.rows}, minmax(0, 1fr))`,
               }}
             >
               <div className="projection-column-head">
@@ -205,22 +258,23 @@ export default function Projection({
                   key={g.board}
                   aria-label={`Masa ${g.board}`}
                 >
-                  <span className="projection-board">
-                    <small>MASA</small>
-                    {g.board}
-                  </span>
-                  <Player entry={byId.get(g.white)!} color="white" />
+                  <span className="projection-board">{g.board}</span>
+                  <Player
+                    entry={byId.get(g.white)!}
+                    fontSize={fitName(g.white)}
+                  />
                   <span
                     className={`projection-result ${g.result ? "has-result" : ""}`}
                   >
                     {score(g.result)}
                   </span>
                   {g.black ? (
-                    <Player entry={byId.get(g.black)!} color="black" />
+                    <Player
+                      entry={byId.get(g.black)!}
+                      fontSize={fitName(g.black)}
+                    />
                   ) : (
-                    <div className="projection-bye">
-                      Tur atladı<small>1 puan</small>
-                    </div>
+                    <div className="projection-bye">Tur atladı</div>
                   )}
                 </article>
               ))}
@@ -238,35 +292,14 @@ export default function Projection({
       )}
       <footer className="projection-footer">
         <span>
-          İTÜ Elo önce, resmî Elo/UKD sonra · 20 saniyede bir yenilenir
+          {selection === "latest"
+            ? "Son tur otomatik"
+            : "Seçilen tur gösteriliyor"}
+          {lastChecked &&
+            ` · ${disconnected ? "Son bağlantı" : "Son kontrol"} ${lastChecked.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`}
         </span>
-        {pages > 1 && (
-          <div className="projection-pagination">
-            <button
-              className="button secondary small"
-              aria-label="Önceki masalar"
-              disabled={!visiblePage}
-              onClick={() => setPage(visiblePage - 1)}
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <b>
-              {visiblePage + 1} / {pages}
-            </b>
-            <button
-              className="button secondary small"
-              aria-label="Sonraki masalar"
-              disabled={visiblePage === pages - 1}
-              onClick={() => setPage(visiblePage + 1)}
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
-        )}
         <span>
-          {visible.length
-            ? `Masa ${visible[0].board}–${visible.at(-1)!.board}`
-            : ""}
+          {games.length ? `Masa ${games[0].board}–${games.at(-1)!.board}` : ""}
           {round?.games.some((g) => g.result === "absent")
             ? ` · ${round.games.filter((g) => g.result === "absent").length} oyuncu bu tur oynamıyor`
             : ""}

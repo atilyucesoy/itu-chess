@@ -72,6 +72,11 @@ test("Turkish website: login, registry, event, pairing, results, finish, next-ev
     await page
       .getByLabel(`Masa ${board} sonucu`, { exact: true })
       .selectOption(board % 2 ? "1-0" : "0-1");
+  const unsaved = await (await page.request.get("/api/state")).json();
+  expect(unsaved.state.tournaments[0].rounds[0].games.every(
+    (game: { result: string | null }) => game.result === null,
+  )).toBeTruthy();
+  await page.getByRole("button", { name: "Sonuçları kaydet", exact: true }).click();
   page.on("dialog", (d) => d.accept());
   const lots = page.getByRole("button", { name: "Eşitlik kurasını çek" });
   if (await lots.isVisible()) await lots.click();
@@ -309,7 +314,7 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
   const before = await (await real.get("/api/backup")).json();
   const club = await (await real.get("/api/state")).json();
   await page.goto("/#settings");
-  await page.getByRole("button", { name: "Deneme ortamını aç" }).click();
+  await page.getByRole("button", { name: "Deneme alanını aç" }).click();
   await expect(
     page.getByRole("region", { name: "Deneme ortamı" }),
   ).toBeVisible();
@@ -351,6 +356,7 @@ test("developer sandbox: full tournament, reset and exit leave actual club data 
   await page.getByRole("button", { name: "2 oyuncuyu kaydet" }).click();
   await page.getByRole("button", { name: "1. turu eşlendir" }).click();
   await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
+  await page.getByRole("button", { name: "Sonuçları kaydet", exact: true }).click();
   await page
     .getByRole("button", { name: "Turnuvayı tamamla", exact: true })
     .click();
@@ -507,4 +513,14 @@ test("player archive and delete from the roster UI", async ({ page }) => {
   expect(
     state.state.players.some((p: { name: string }) => p.name === "Arşiv Testi"),
   ).toBe(false);
+});
+
+test("failed initial data load shows a retry instead of an empty club", async ({ page }) => {
+  await page.route("**/api/state", (route) => route.abort());
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Siteye bağlanılamadı" })).toBeVisible();
+  await expect(page.getByText("Henüz turnuva yok")).toHaveCount(0);
+  await page.unroute("**/api/state");
+  await page.getByRole("button", { name: "Tekrar dene", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Genel bakış", exact: true })).toBeVisible();
 });

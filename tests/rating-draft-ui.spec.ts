@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("owner can opt into an editable first-performance cap without rewriting event history", async ({
+test("owner can save conditional rating settings without rewriting event history", async ({
   page,
 }) => {
   await page.request.post("/api/login", {
@@ -8,21 +8,42 @@ test("owner can opt into an editable first-performance cap without rewriting eve
   });
   const before = await (await page.request.get("/api/state")).json();
   await page.goto("/#settings");
-  const toggle = page.getByLabel("İlk performans ratingine üst sınır uygula", {
+  const method = page.getByLabel("Derecesiz oyuncunun ilk İTÜ Elo’su", {
     exact: true,
   });
-  await expect(toggle).not.toBeChecked();
+  const reference = page.getByLabel(
+    "Derecesiz oyuncular için başlangıç referansı",
+    { exact: true },
+  );
+  const cap = page.getByLabel("İlk rating üst sınırı", { exact: true });
   await expect(
-    page.getByLabel("İlk rating üst sınırı", { exact: true }),
-  ).toBeDisabled();
-  await toggle.check();
+    page.getByRole("heading", { name: "Görünüm", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Deneme alanı", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Deneme alanını aç", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("İlk performans ratingine üst sınır uygula", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await method.selectOption("performance");
+  await expect(reference).toHaveCount(0);
+  await cap.fill("3000");
+  await method.selectOption("seed");
+  await expect(cap).toHaveCount(0);
+  await reference.fill("1600");
+  await method.selectOption("performance");
+  await expect(cap).toHaveValue("3000");
   await page.getByLabel("İlk rating üst sınırı", { exact: true }).fill("1900");
   await page
     .getByRole("button", { name: "Politikayı kaydet", exact: true })
     .click();
   await expect(page.getByText("Kaydedildi", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(toggle).toBeChecked();
   await expect(
     page.getByLabel("İlk rating üst sınırı", { exact: true }),
   ).toHaveValue("1900");
@@ -34,11 +55,20 @@ test("owner can opt into an editable first-performance cap without rewriting eve
   await page
     .getByLabel("Derecesiz oyuncunun ilk İTÜ Elo’su", { exact: true })
     .selectOption("seed");
-  await expect(toggle).toBeDisabled();
+  await expect(cap).toHaveCount(0);
+  await expect(reference).toHaveValue("1600");
+  await reference.fill("1700");
+  await page
+    .getByRole("button", { name: "Politikayı kaydet", exact: true })
+    .click();
+  await expect(page.getByText("Kaydedildi", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(reference).toHaveValue("1700");
+  await expect(cap).toHaveCount(0);
   await page
     .getByLabel("Derecesiz oyuncunun ilk İTÜ Elo’su", { exact: true })
     .selectOption("performance");
-  await expect(toggle).toBeChecked();
+  await expect(cap).toHaveValue("1900");
   await page.screenshot({
     path: "test-results/rating-cap-settings.png",
     fullPage: true,
@@ -129,6 +159,25 @@ test("draft inline player creation preserves unsaved selections and copying a ro
       (p: { name: string }) => p.name === "Inline C new",
     ),
   ).toHaveLength(1);
+  const pair = page.getByRole("button", {
+    name: "1. turu eşlendir",
+    exact: true,
+  });
+  await expect(pair).toBeEnabled();
+  await page.getByRole("checkbox", { name: /Inline B/ }).uncheck();
+  await expect(pair).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Eşlendirmeler", exact: true })
+    .click();
+  await expect(pair).toBeDisabled();
+  await page.getByRole("button", { name: "Oyuncular", exact: true }).click();
+  await expect(
+    page.getByRole("checkbox", { name: /Inline B/ }),
+  ).not.toBeChecked();
+  await page
+    .getByRole("button", { name: "Kayıtlı seçime dön", exact: true })
+    .click();
+  await expect(pair).toBeEnabled();
   const count = after.state.players.length,
     entries = stored.entries;
   await page

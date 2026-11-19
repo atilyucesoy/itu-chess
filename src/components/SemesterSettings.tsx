@@ -53,8 +53,10 @@ export default function SemesterSettings({
         </fieldset>
       </form>
       {owner && (
-        <details className="advanced">
-          <summary>Yeni dönem oluştur</summary>
+        <details className="advanced settings-create">
+          <summary className="button">
+            <Plus size={17} /> Yeni dönem oluştur
+          </summary>
           <form
             onSubmit={async (e) => {
               e.preventDefault();

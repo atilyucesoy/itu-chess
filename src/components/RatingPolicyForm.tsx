@@ -13,13 +13,10 @@ export default function RatingPolicyForm({
 }) {
   const [saving, setSaving] = useState(false);
   const [method, setMethod] = useState(policy.initialMethod);
-  const [capEnabled, setCapEnabled] = useState(
-    policy.initialPerformanceCapEnabled ?? false,
-  );
+  const [reference, setReference] = useState(String(policy.reference));
   const [capValue, setCapValue] = useState(
     String(policy.initialPerformanceCap ?? 1900),
   );
-  const usesCap = capEnabled && method === "performance";
   return (
     <form
       onSubmit={async (e) => {
@@ -29,14 +26,14 @@ export default function RatingPolicyForm({
           cap = Number(capValue);
         setSaving(true);
         await onSave({
-          reference: Number(d.get("reference")),
+          reference: Number(reference),
           initialMethod: method,
           provisionalGames: Number(d.get("provisionalGames")),
           provisionalK: Number(d.get("provisionalK")),
           establishedK: Number(d.get("establishedK")),
-          initialPerformanceCapEnabled: capEnabled,
+          initialPerformanceCapEnabled: method === "performance",
           initialPerformanceCap:
-            usesCap || (Number.isInteger(cap) && cap >= 100 && cap <= 3500)
+            Number.isInteger(cap) && cap >= 100 && cap <= 3500
               ? cap
               : (policy.initialPerformanceCap ?? 1900),
         });
@@ -44,18 +41,6 @@ export default function RatingPolicyForm({
       }}
     >
       <fieldset disabled={!owner || saving}>
-        <label className="field">
-          <span>Derecesiz oyuncular için başlangıç referansı</span>
-          <input
-            aria-label="Derecesiz oyuncular için başlangıç referansı"
-            name="reference"
-            type="number"
-            required
-            min={100}
-            max={3500}
-            defaultValue={policy.reference}
-          />
-        </label>
         <label className="field">
           <span>Derecesiz oyuncunun ilk İTÜ Elo’su</span>
           <select
@@ -70,41 +55,40 @@ export default function RatingPolicyForm({
             <option value="seed">Başlangıç referansı + Elo değişimi</option>
           </select>
         </label>
-        <label className="check-row">
-          <input
-            aria-label="İlk performans ratingine üst sınır uygula"
-            type="checkbox"
-            name="initialPerformanceCapEnabled"
-            checked={capEnabled}
-            disabled={method !== "performance"}
-            onChange={(e) => setCapEnabled(e.target.checked)}
-          />
-          <span>
-            <strong>İlk performans ratingine üst sınır uygula</strong>
+        {method === "performance" ? (
+          <label className="field">
+            <span>İlk rating üst sınırı</span>
+            <input
+              aria-label="İlk rating üst sınırı"
+              name="initialPerformanceCap"
+              type="number"
+              min={100}
+              max={3500}
+              required
+              value={capValue}
+              onChange={(e) => setCapValue(e.target.value)}
+            />
             <small>
-              Yalnız resmî ve İTÜ ratingi olmayan oyuncunun ilk ratingi; sonraki
-              gelişimini sınırlamaz.
+              Örneğin 1900. Yalnız resmî ve İTÜ ratingi olmayan oyuncunun ilk
+              ratingine uygulanır; sonraki gelişimini sınırlamaz. Yüksek bir
+              sınır için 3000 gibi bir değer belirleyebilirsiniz.
             </small>
-          </span>
-        </label>
-        <label className="field">
-          <span>İlk rating üst sınırı</span>
-          <input
-            aria-label="İlk rating üst sınırı"
-            name="initialPerformanceCap"
-            type="number"
-            min={100}
-            max={3500}
-            required
-            disabled={!usesCap}
-            value={capValue}
-            onChange={(e) => setCapValue(e.target.value)}
-          />
-          <small>
-            Örneğin 1900. Resmî ratingden başlayanlara uygulanmaz; sınırın
-            altındaki sonuçlar olduğu gibi kalır.
-          </small>
-        </label>
+          </label>
+        ) : (
+          <label className="field">
+            <span>Derecesiz oyuncular için başlangıç referansı</span>
+            <input
+              aria-label="Derecesiz oyuncular için başlangıç referansı"
+              name="reference"
+              type="number"
+              required
+              min={100}
+              max={3500}
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+          </label>
+        )}
         <label className="field">
           <span>Geçici rating süresi (oynanan maç)</span>
           <input

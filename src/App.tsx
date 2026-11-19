@@ -59,7 +59,6 @@ import {
 } from "../shared/types";
 import { standings, championship } from "../shared/standings";
 import SemesterSettings from "./components/SemesterSettings";
-import AppearanceSettings from "./components/AppearanceSettings";
 import Projection from "./components/Projection";
 import RatingPolicyForm from "./components/RatingPolicyForm";
 import LateEntryForm from "./components/LateEntryForm";
@@ -219,6 +218,9 @@ export default function App() {
   );
   const [sandboxAvailable, setSandboxAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [toast, setToast] = useState<{
@@ -249,32 +251,49 @@ export default function App() {
   );
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
-    const response = await fetch("/api/state", {
-      headers: stateTag.current ? { "If-None-Match": stateTag.current } : {},
-      cache: "no-store",
-    });
-    if (sequence !== loadSequence.current) return;
-    if (response.status === 304) return;
-    if (!response.ok)
-      throw new Error("Sunucuya ulaşılamıyor. Birazdan tekrar deneyin.");
-    const data = await response.json();
-    if (sequence !== loadSequence.current) return;
-    stateTag.current = response.headers.get("ETag");
-    setState(data.state);
-    setRevision(data.revision);
-    setUser(data.user);
-    setWorkspace(data.workspace ?? "club");
-    setSandboxAvailable(data.sandboxAvailable === true);
-    setLoading(false);
+    setRefreshing(true);
+    try {
+      const response = await fetch("/api/state", {
+        headers: stateTag.current ? { "If-None-Match": stateTag.current } : {},
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!response.ok && response.status !== 304) throw new Error();
+      const data = response.status === 304 ? null : await response.json();
+      if (sequence !== loadSequence.current) return;
+      if (data) {
+        stateTag.current = response.headers.get("ETag");
+        setState(data.state);
+        setRevision(data.revision);
+        setUser(data.user);
+        setWorkspace(data.workspace ?? "club");
+        setSandboxAvailable(data.sandboxAvailable === true);
+      }
+      setLastChecked(new Date());
+      setDisconnected(false);
+    } catch {
+      if (sequence !== loadSequence.current) return;
+      setDisconnected(true);
+      throw new Error("Sunucuya ulaşılamıyor. Tekrar deneyin.");
+    } finally {
+      if (sequence === loadSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
   }, []);
+  const refresh = useCallback(() => {
+    void load().catch(() => {});
+  }, [load]);
   useEffect(() => {
-    load().catch((e) => {
-      notify(e.message, true);
-      setLoading(false);
-    });
-    const timer = setInterval(() => load().catch(() => {}), 20_000);
-    return () => clearInterval(timer);
-  }, [load, notify]);
+    refresh();
+    const timer = setInterval(refresh, 20_000);
+    window.addEventListener("online", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("online", refresh);
+    };
+  }, [refresh]);
   useEffect(() => {
     const listener = () => {
       setRoute(location.hash.slice(1) || "home");
@@ -314,7 +333,12 @@ export default function App() {
   const go = (page: string) => {
     location.hash = page;
   };
-  async function action(name: string, payload: object, success = "Kaydedildi") {
+  async function action(
+    name: string,
+    payload: object,
+    success = "Kaydedildi",
+    onError?: (message: string) => void,
+  ) {
     setBusy(true);
     try {
       const response = await fetch("/api/action", {
@@ -325,18 +349,28 @@ export default function App() {
       const data = await response.json();
       if (!response.ok) {
         if (response.status === 409 || response.status === 401) {
-          await load();
-          setModal(null);
+          await load().catch(() => {});
+          if (
+            response.status === 401 ||
+            name !== "tournament.playerCreate" ||
+            data.error?.startsWith("Çalışma alanı")
+          )
+            setModal(null);
         }
         throw new Error(
           data.details ? `${data.error} ${data.details}` : data.error,
         );
       }
-      await load();
+      await load().catch(() => {});
       notify(success);
       return true;
     } catch (e) {
-      notify((e as Error).message, true);
+      const message =
+        e instanceof TypeError
+          ? "Bağlantı kurulamadı. Tekrar deneyin."
+          : (e as Error).message;
+      if (onError) onError(message);
+      else notify(message, true);
       return false;
     } finally {
       setBusy(false);
@@ -427,7 +461,11 @@ export default function App() {
       ),
     });
   }
-  function createTournamentPlayer(t: Tournament, selectedIds: string[]) {
+  function createTournamentPlayer(
+    t: Tournament,
+    selectedIds: string[],
+    onCommitted: () => void,
+  ) {
     setModal({
       title: "Yeni oyuncu oluştur ve ekle",
       content: (
@@ -439,8 +477,10 @@ export default function App() {
                 { tournamentId: t.id, playerIds: selectedIds, newPlayer },
                 "Oyuncu kaydedildi ve turnuvaya eklendi",
               )
-            )
+            ) {
+              onCommitted();
               setModal(null);
+            }
           }}
         />
       ),
@@ -755,8 +795,37 @@ export default function App() {
               <ClubMark size={55} />
               <p>Yükleniyor…</p>
             </div>
+          ) : !lastChecked && disconnected ? (
+            <Empty
+              title="Siteye bağlanılamadı"
+              action={
+                <button
+                  className="button"
+                  disabled={refreshing}
+                  onClick={refresh}
+                >
+                  {refreshing ? "Bağlanıyor…" : "Tekrar dene"}
+                </button>
+              }
+            >
+              Turnuva verileri henüz yüklenemedi.
+            </Empty>
           ) : (
             <>
+              {disconnected && page !== "projection" && (
+                <div className="connection-notice" role="status">
+                  <span>
+                    Bağlantı kesildi. Son görülen veriler gösteriliyor.
+                  </span>
+                  <button
+                    className="button secondary small"
+                    disabled={refreshing}
+                    onClick={refresh}
+                  >
+                    {refreshing ? "Bağlanıyor…" : "Tekrar dene"}
+                  </button>
+                </div>
+              )}
               {page === "sandbox" && (
                 <section className="card padded sandbox-welcome">
                   <FlaskConical size={32} />
@@ -817,9 +886,10 @@ export default function App() {
                   tournament={state.tournaments.find((t) => t.id === id)}
                   sandbox={workspace !== "club"}
                   expired={workspace === "expired"}
-                  onRefresh={() => {
-                    load().catch((e) => notify(e.message, true));
-                  }}
+                  disconnected={disconnected}
+                  refreshing={refreshing}
+                  lastChecked={lastChecked}
+                  onRefresh={refresh}
                 />
               )}
               {page === "home" && (
@@ -1428,12 +1498,16 @@ export default function App() {
                       state={state}
                       user={user}
                       busy={busy}
+                      disconnected={disconnected}
+                      lastChecked={lastChecked}
                       sandbox={workspace !== "club"}
                       action={action}
                       openPlayer={openPlayer}
                       notify={notify}
                       onLateEntry={() => lateEntry(t)}
-                      onNewPlayer={(ids) => createTournamentPlayer(t, ids)}
+                      onNewPlayer={(ids, onCommitted) =>
+                        createTournamentPlayer(t, ids, onCommitted)
+                      }
                       onEdit={() =>
                         setModal({
                           title: "Turnuva ayarları",
@@ -1465,16 +1539,11 @@ export default function App() {
               {page === "settings" &&
                 (user ? (
                   <SettingsPage
-                    appearance={
-                      <AppearanceSettings dark={dark} onDark={setDark} />
-                    }
                     state={state}
                     user={user}
                     action={action}
                     revision={revision}
-                    sandboxAvailable={sandboxAvailable}
                     sandbox={workspace !== "club"}
-                    onEnterSandbox={() => sandboxAction("enter")}
                   />
                 ) : (
                   <Empty
@@ -1843,12 +1912,15 @@ type Action = (
   name: string,
   payload: object,
   success?: string,
+  onError?: (message: string) => void,
 ) => Promise<boolean>;
 function TournamentDesk({
   t,
   state,
   user,
   busy,
+  disconnected,
+  lastChecked,
   sandbox,
   action,
   openPlayer,
@@ -1861,23 +1933,86 @@ function TournamentDesk({
   state: PublicState;
   user: SessionUser | null;
   busy: boolean;
+  disconnected: boolean;
+  lastChecked: Date | null;
   sandbox: boolean;
   action: Action;
   openPlayer: (id: string) => void;
   notify: (s: string, e?: boolean) => void;
   onLateEntry: () => void;
-  onNewPlayer: (ids: string[]) => void;
+  onNewPlayer: (ids: string[], onCommitted: () => void) => void;
   onEdit: () => void;
 }) {
   const [tab, setTab] = useState(
     t.status === "draft" ? "participants" : "pairings",
   );
+  const [rosterDraft, setRosterDraft] = useState<{
+    selected: Set<string>;
+    base: string;
+  } | null>(null);
+  const savedRoster = t.entries.map((entry) => entry.playerId);
+  const rosterVersion = [...savedRoster].sort().join(",");
+  const selectedRoster = rosterDraft?.selected ?? new Set(savedRoster);
+  const rosterDirty =
+    t.status === "draft" &&
+    (selectedRoster.size !== savedRoster.length ||
+      savedRoster.some((id) => !selectedRoster.has(id)));
+  const rosterChanged = rosterDirty && rosterDraft?.base !== rosterVersion;
+  function selectRoster(next: Set<string>) {
+    setRosterDraft(
+      next.size === savedRoster.length &&
+        savedRoster.every((id) => next.has(id))
+        ? null
+        : { selected: next, base: rosterDraft?.base ?? rosterVersion },
+    );
+  }
+  const [resultSaving, setResultSaving] = useState(false);
+  const [resultError, setResultError] = useState("");
   const [selectedRound, setSelectedRound] = useState(t.rounds.length);
+  const [resultDraft, setResultDraft] = useState<
+    Record<
+      number,
+      {
+        board: number;
+        white: string;
+        black: string;
+        previous: Result | null;
+        result: Result | null;
+      }
+    >
+  >({});
   useEffect(() => {
     setSelectedRound(t.rounds.length);
+    setResultDraft({});
+    setResultError("");
   }, [t.rounds.length]);
+  const draftResults = Object.values(resultDraft);
+  const hasPendingResults = draftResults.length > 0;
   const rows = standings(t);
   const round = t.rounds.find((r) => r.number === selectedRound);
+  const editingResults =
+    !!user && t.status === "live" && round?.number === t.rounds.length;
+  const shownResult = (game: Tournament["rounds"][number]["games"][number]) =>
+    editingResults && resultDraft[game.board]
+      ? resultDraft[game.board].result
+      : game.result;
+  const missingResults =
+    t.rounds.at(-1)?.games.filter((game) => game.black && !game.result)
+      .length ?? 0;
+  async function saveResults() {
+    setResultError("");
+    setResultSaving(true);
+    if (
+      await action(
+        "round.results.save",
+        { tournamentId: t.id, round: t.rounds.length, changes: draftResults },
+        "Tur sonuçları kaydedildi",
+        setResultError,
+      )
+    )
+      setResultDraft({});
+    setResultSaving(false);
+  }
   const name = (id: string) =>
     t.entries.find((e) => e.playerId === id)?.name ?? "—";
   const entry = (id: string) => t.entries.find((e) => e.playerId === id)!;
@@ -2008,59 +2143,81 @@ function TournamentDesk({
           ))}
         </div>
         {user && t.status !== "finished" && (
-          <button
-            className="button"
-            disabled={
-              busy || (t.status === "draft" ? t.entries.length < 2 : !allDone)
-            }
-            onClick={async () => {
-              if (finalRound) {
-                if (needsLots) {
-                  if (
+          <div className="round-next">
+            <button
+              className="button"
+              disabled={
+                busy ||
+                disconnected ||
+                rosterDirty ||
+                hasPendingResults ||
+                (t.status === "draft" ? t.entries.length < 2 : !allDone)
+              }
+              onClick={async () => {
+                if (finalRound) {
+                  if (needsLots) {
+                    if (
+                      confirm(
+                        "Tüm tie-break değerleri eşit olan oyuncular için rastgele son sıralama kurası çekilsin mi?",
+                      )
+                    )
+                      await action(
+                        "tournament.lots",
+                        { tournamentId: t.id, confirm: true },
+                        "Sıralama kurası kaydedildi",
+                      );
+                  } else if (
                     confirm(
-                      "Tüm tie-break değerleri eşit olan oyuncular için rastgele son sıralama kurası çekilsin mi?",
+                      "Turnuva tamamlansın mı? Dönem puanları ve varsa İTÜ Elo güncellenecek.",
                     )
                   )
                     await action(
-                      "tournament.lots",
-                      { tournamentId: t.id, confirm: true },
-                      "Sıralama kurası kaydedildi",
+                      "tournament.finalize",
+                      { tournamentId: t.id },
+                      "Turnuva tamamlandı!",
                     );
                 } else if (
-                  confirm(
-                    "Turnuva tamamlansın mı? Dönem puanları ve varsa İTÜ Elo güncellenecek.",
+                  await action(
+                    "round.generate",
+                    { tournamentId: t.id },
+                    "Eşlendirmeler hazır",
                   )
                 )
-                  await action(
-                    "tournament.finalize",
-                    { tournamentId: t.id },
-                    "Turnuva tamamlandı!",
-                  );
-              } else if (
-                await action(
-                  "round.generate",
-                  { tournamentId: t.id },
-                  "Eşlendirmeler hazır",
+                  setTab("pairings");
+              }}
+            >
+              {finalRound ? (
+                needsLots ? (
+                  <Shuffle size={17} />
+                ) : (
+                  <Flag size={17} />
                 )
-              )
-                setTab("pairings");
-            }}
-          >
-            {finalRound ? (
-              needsLots ? (
-                <Shuffle size={17} />
               ) : (
-                <Flag size={17} />
-              )
-            ) : (
-              <Play size={18} fill="currentColor" />
-            )}{" "}
-            {finalRound
-              ? needsLots
-                ? "Eşitlik kurasını çek"
-                : "Turnuvayı tamamla"
-              : `${t.rounds.length + 1}. turu eşlendir`}
-          </button>
+                <Play size={18} fill="currentColor" />
+              )}{" "}
+              {finalRound
+                ? needsLots
+                  ? "Eşitlik kurasını çek"
+                  : "Turnuvayı tamamla"
+                : `${t.rounds.length + 1}. turu eşlendir`}
+            </button>
+            {t.status === "draft" && (
+              <small>
+                {savedRoster.length} kayıtlı oyuncu
+                {rosterDirty
+                  ? ` · ${selectedRoster.size} seçili, önce kadroyu kaydet.`
+                  : ""}
+              </small>
+            )}
+            {t.status === "live" &&
+              (hasPendingResults || missingResults > 0) && (
+                <small>
+                  {hasPendingResults
+                    ? "Önce sonuçları kaydet."
+                    : `${missingResults} maçın sonucu eksik.`}
+                </small>
+              )}
+          </div>
         )}
       </div>
       <div className="toolbar detail-toolbar">
@@ -2138,13 +2295,26 @@ function TournamentDesk({
             <>
               <div className="card-section-heading">
                 <h2>{round.number}. tur eşlendirmeleri</h2>
-                <span className="muted">
-                  {round.games.filter((g) => g.board && g.result).length} /{" "}
-                  {round.games.filter((g) => g.board).length} sonuç
+                <span className="muted round-data-status">
+                  {lastChecked && (
+                    <span>
+                      {disconnected ? "Son bağlantı" : "Son kontrol"}{" "}
+                      {lastChecked.toLocaleTimeString("tr-TR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
+                    </span>
+                  )}
+                  {round.games.filter((g) => g.board && shownResult(g)).length}{" "}
+                  / {round.games.filter((g) => g.board).length} sonuç
                 </span>
               </div>
               <div className="table-wrap">
-                <table className="pairings-table">
+                <table
+                  className={`pairings-table${editingResults ? " editing-results" : ""}`}
+                  role="table"
+                >
                   <thead>
                     <tr>
                       <th>Masa</th>
@@ -2163,11 +2333,12 @@ function TournamentDesk({
                     {round.games
                       .filter((g) => g.board > 0)
                       .map((g) => (
-                        <tr key={g.board}>
-                          <td>
+                        <tr key={g.board} role="row">
+                          <td role="cell" className="pairing-board-cell">
                             <span className="board-number">{g.board}</span>
                           </td>
-                          <td>
+                          <td role="cell" className="pairing-white">
+                            <small className="pairing-color">Beyaz</small>
                             <button
                               className="player-name"
                               onClick={() => openPlayer(g.white)}
@@ -2180,37 +2351,60 @@ function TournamentDesk({
                               kind={entry(g.white).officialType}
                             />
                           </td>
-                          <td className="result-col">
+                          <td role="cell" className="result-col">
                             {user &&
                             t.status === "live" &&
                             round.number === t.rounds.length &&
                             g.black ? (
-                              <select
-                                aria-label={`Masa ${g.board} sonucu`}
-                                className={`result-select ${g.result ? "has-result" : ""}`}
-                                value={g.result ?? ""}
-                                disabled={busy}
-                                onChange={(e) =>
-                                  action(
-                                    "round.result",
-                                    {
-                                      tournamentId: t.id,
-                                      round: round.number,
-                                      board: g.board,
-                                      result: e.target.value || null,
-                                    },
-                                    "Sonuç kaydedildi",
-                                  )
-                                }
-                              >
-                                <option value="">· · ·</option>
-                                <option value="1-0">1 – 0</option>
-                                <option value="1/2">½ – ½</option>
-                                <option value="0-1">0 – 1</option>
-                                <option value="+-">+ – − (hükmen)</option>
-                                <option value="-+">− – + (hükmen)</option>
-                                <option value="--">− – − (çift hükmen)</option>
-                              </select>
+                              <div className="board-result-editor">
+                                <select
+                                  aria-label={`Masa ${g.board} sonucu`}
+                                  className={`result-select ${shownResult(g) ? "has-result" : ""}`}
+                                  value={shownResult(g) ?? ""}
+                                  disabled={busy}
+                                  onChange={(e) => {
+                                    setResultError("");
+                                    const result = (e.target.value ||
+                                      null) as Result | null;
+                                    const black = g.black!;
+                                    setResultDraft((current) => {
+                                      const next = { ...current };
+                                      if (result === g.result)
+                                        delete next[g.board];
+                                      else
+                                        next[g.board] = {
+                                          board: g.board,
+                                          white: g.white,
+                                          black,
+                                          previous: current[g.board]
+                                            ? current[g.board].previous
+                                            : g.result,
+                                          result,
+                                        };
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <option value="">Sonuç seç</option>
+                                  <option value="1-0">1 – 0</option>
+                                  <option value="1/2">½ – ½</option>
+                                  <option value="0-1">0 – 1</option>
+                                  <option value="+-">+ – − (hükmen)</option>
+                                  <option value="-+">− – + (hükmen)</option>
+                                  <option value="--">
+                                    − – − (çift hükmen)
+                                  </option>
+                                </select>
+                                {(resultDraft[g.board] || g.result) && (
+                                  <small className="board-result-state">
+                                    {resultDraft[g.board]
+                                      ? resultSaving
+                                        ? "Kaydediliyor…"
+                                        : "Kaydedilmedi"
+                                      : "Kaydedildi"}
+                                  </small>
+                                )}
+                              </div>
                             ) : (
                               <span
                                 className={`result ${g.result ? "has-result" : ""}`}
@@ -2219,7 +2413,8 @@ function TournamentDesk({
                               </span>
                             )}
                           </td>
-                          <td>
+                          <td role="cell" className="pairing-black">
+                            <small className="pairing-color">Siyah</small>
                             {g.black ? (
                               <>
                                 <button
@@ -2246,6 +2441,44 @@ function TournamentDesk({
                   </tbody>
                 </table>
               </div>
+              {editingResults && round.games.some((g) => g.black) && (
+                <div className="round-save">
+                  {resultError && (
+                    <p className="form-error round-save-error" role="alert">
+                      {resultError}
+                    </p>
+                  )}
+                  <span role="status">
+                    {hasPendingResults
+                      ? `${draftResults.length} değişiklik kaydedilmedi`
+                      : missingResults > 0
+                        ? "Sonuçlar kaydedildiğinde yayınlanır."
+                        : "Tüm sonuçlar kaydedildi."}
+                  </span>
+                  {hasPendingResults && (
+                    <button
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        setResultDraft({});
+                        setResultError("");
+                      }}
+                    >
+                      Değişiklikleri geri al
+                    </button>
+                  )}
+                  <button
+                    className="button"
+                    disabled={busy || disconnected || !hasPendingResults}
+                    onClick={saveResults}
+                  >
+                    <Check size={16} />
+                    {resultError
+                      ? "Kaydetmeyi tekrar dene"
+                      : "Sonuçları kaydet"}
+                  </button>
+                </div>
+              )}
               {round.games.some((g) => g.result === "absent") && (
                 <p className="footnote inset">
                   Oynamayanlar:{" "}
@@ -2360,20 +2593,28 @@ function TournamentDesk({
       {tab === "participants" &&
         (t.status === "draft" && user ? (
           <ParticipantPicker
-            key={t.entries.map((e) => e.playerId).join(",")}
-            t={t}
+            selected={selectedRoster}
+            setSelected={selectRoster}
+            dirty={rosterDirty}
+            changed={rosterChanged}
+            savedCount={savedRoster.length}
+            onDiscard={() => setRosterDraft(null)}
+            disabled={busy || disconnected}
             players={state.players.filter(
               (p) =>
                 !p.archivedAt || t.entries.some((e) => e.playerId === p.id),
             )}
             last={lastTournament}
-            onNewPlayer={onNewPlayer}
-            onSave={(ids) =>
-              action("tournament.entries", {
-                tournamentId: t.id,
-                playerIds: ids,
-              })
-            }
+            onNewPlayer={(ids) => onNewPlayer(ids, () => setRosterDraft(null))}
+            onSave={async (ids) => {
+              if (
+                await action("tournament.entries", {
+                  tournamentId: t.id,
+                  playerIds: ids,
+                })
+              )
+                setRosterDraft(null);
+            }}
           />
         ) : (
           <div className="card table-wrap">
@@ -2588,21 +2829,30 @@ function resultLabel(r: Result | null) {
                 : "· · ·";
 }
 function ParticipantPicker({
-  t,
+  selected,
+  setSelected,
+  dirty,
+  changed,
+  savedCount,
+  onDiscard,
+  disabled,
   players,
   last,
   onSave,
   onNewPlayer,
 }: {
-  t: Tournament;
+  selected: Set<string>;
+  setSelected: (ids: Set<string>) => void;
+  dirty: boolean;
+  changed: boolean;
+  savedCount: number;
+  onDiscard: () => void;
+  disabled: boolean;
   players: Player[];
   last?: Tournament;
-  onSave: (ids: string[]) => Promise<boolean>;
+  onSave: (ids: string[]) => Promise<void>;
   onNewPlayer: (ids: string[]) => void;
 }) {
-  const [selected, setSelected] = useState(
-    new Set(t.entries.map((e) => e.playerId)),
-  );
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const visible = players.filter((p) =>
@@ -2627,7 +2877,7 @@ function ParticipantPicker({
         <div className="button-group">
           <button
             className="button secondary small"
-            disabled={saving || selected.size >= 200}
+            disabled={disabled || saving || selected.size >= 200}
             onClick={() => onNewPlayer([...selected])}
           >
             <Plus size={16} />
@@ -2715,12 +2965,23 @@ function ParticipantPicker({
         </Empty>
       )}
       <div className="picker-footer">
-        <span className="footnote">
-          Eşlendirmeden önce katılımcı listesini kaydet.
+        <span className="footnote" role="status">
+          {changed
+            ? "Kayıtlı kadro başka bir yönetici tarafından değiştirildi. Kaydedersen bu seçim uygulanır."
+            : `${savedCount} kayıtlı${dirty ? ` · ${selected.size} seçili, henüz kaydedilmedi` : ""}`}
         </span>
+        {dirty && (
+          <button
+            className="button secondary"
+            disabled={saving}
+            onClick={onDiscard}
+          >
+            Kayıtlı seçime dön
+          </button>
+        )}
         <button
           className="button"
-          disabled={saving}
+          disabled={disabled || saving || !dirty}
           onClick={async () => {
             setSaving(true);
             await onSave([...selected]);
@@ -2885,23 +3146,17 @@ function PlayerProfile({
   );
 }
 function SettingsPage({
-  appearance,
   state,
   user,
   action,
   revision,
-  sandboxAvailable,
   sandbox,
-  onEnterSandbox,
 }: {
-  appearance: ReactNode;
   state: PublicState;
   user: SessionUser;
   action: Action;
   revision: number;
-  sandboxAvailable: boolean;
   sandbox: boolean;
-  onEnterSandbox: () => void;
 }) {
   const [managers, setManagers] = useState<SessionUser[]>([]);
   const [saving, setSaving] = useState(false);
@@ -2913,6 +3168,23 @@ function SettingsPage({
         .then(setManagers)
         .catch(() => {});
   }, [owner, revision, sandbox]);
+  const auditRows = state.audit.slice(0, 12).map((a, i) => (
+    <div key={i}>
+      <span className="audit-dot" />
+      <div>
+        <strong>{a.by}</strong>
+        <span>{auditLabel(a.action)}</span>
+      </div>
+      <time>
+        {new Date(a.at).toLocaleString("tr-TR", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </time>
+    </div>
+  ));
   return (
     <>
       <div className="page-heading">
@@ -2921,62 +3193,50 @@ function SettingsPage({
           <p>Rating politikası, yönetici hesapları ve verilerin.</p>
         </div>
       </div>
-      {sandboxAvailable && !sandbox && (
-        <section className="card padded developer-settings">
-          <h2>Deneme alanı</h2>
-          <p className="muted">
-            Mevcut kadronun bir kopyasıyla bu tarayıcıya özel, ayrı bir deneme
-            alanı açar. Deneme verileri yalnız sunucu belleğinde tutulur;
-            sıfırlama, çıkış veya sunucu yeniden başlatıldığında silinir ve
-            kadro bugünkü hâline döner. Gerçek oyuncular, turnuvalar ve
-            ratingler değişmez. Yönetim kurulu hesabıyla da kullanılabilir.
-          </p>
-          <button className="button secondary" onClick={onEnterSandbox}>
-            Deneme ortamını aç
-          </button>
-        </section>
-      )}
       <div className="settings-grid">
-        <SemesterSettings state={state} owner={owner} action={action} />
-        {appearance}
-        <section className="card padded">
-          <h2>İTÜ Elo politikası</h2>
-          <p className="muted">Kulüp içinde karar verdikçe değiştirilebilir.</p>
-          <RatingPolicyForm
-            key={JSON.stringify(state.policy)}
-            policy={state.policy}
-            owner={owner}
-            onSave={(policy) => action("policy.save", policy)}
-          />
-          <div className="info-box">
-            <ShieldCheck size={19} />
-            <p>
-              Değişiklikler yeni başlayacak turnuvalara uygulanır. Mevcut
-              turnuvaların başlangıç sıralaması değişmez.
+        <div className="settings-stack">
+          <SemesterSettings state={state} owner={owner} action={action} />
+          <section className="card padded">
+            <h2>İTÜ Elo politikası</h2>
+            <p className="muted">
+              Kulüp içinde karar verdikçe değiştirilebilir.
             </p>
-          </div>
-          <details className="advanced">
-            <summary>Hesaplama nasıl çalışır?</summary>
-            <p>
-              Resmî ratingi olan oyuncu bu değerden başlar. Daha sonra yalnız
-              İTÜ Elo kullanılır. Elo beklentisi: 1 / (1 + 10^((rakip − oyuncu)
-              / 400)). Değişim: K × (sonuç − beklenti).
-            </p>
-            <p>
-              Derecesiz ilk rating: rakiplerin ortalama başlangıç ratingi + 400
-              × log10((puan + 0,5) / (oynanan maç − puan + 0,5)). Bu kulübe
-              özel, yumuşatılmış bir tahmindir; FIDE’nin ilk rating formülü
-              değildir. Byeler/hükmen sonuçlar dışlanır. Değerler 100–3500
-              aralığında tutulur.
-            </p>
-            <p>
-              Her turnuva için başlangıç ratingleri sabittir. Geçmiş yeniden
-              hesaplanırsa Elo hesapları yenilenir, oynanmış eşlendirmeler ve
-              başlangıç snapshotları korunur. Geçmiş resmî ratingler giriş
-              snapshotlarından alınır.
-            </p>
-          </details>
-        </section>
+            <RatingPolicyForm
+              key={JSON.stringify(state.policy)}
+              policy={state.policy}
+              owner={owner}
+              onSave={(policy) => action("policy.save", policy)}
+            />
+            <div className="info-box">
+              <ShieldCheck size={19} />
+              <p>
+                Değişiklikler yeni başlayacak turnuvalara uygulanır. Mevcut
+                turnuvaların başlangıç sıralaması değişmez.
+              </p>
+            </div>
+            <details className="advanced">
+              <summary>Hesaplama nasıl çalışır?</summary>
+              <p>
+                Resmî ratingi olan oyuncu bu değerden başlar. Daha sonra yalnız
+                İTÜ Elo kullanılır. Elo beklentisi: 1 / (1 + 10^((rakip −
+                oyuncu) / 400)). Değişim: K × (sonuç − beklenti).
+              </p>
+              <p>
+                Derecesiz ilk rating: rakiplerin ortalama başlangıç ratingi +
+                400 × log10((puan + 0,5) / (oynanan maç − puan + 0,5)). Bu
+                kulübe özel, yumuşatılmış bir tahmindir; FIDE’nin ilk rating
+                formülü değildir. Byeler/hükmen sonuçlar dışlanır. Değerler
+                100–3500 aralığında tutulur.
+              </p>
+              <p>
+                Her turnuva için başlangıç ratingleri sabittir. Geçmiş yeniden
+                hesaplanırsa Elo hesapları yenilenir, oynanmış eşlendirmeler ve
+                başlangıç snapshotları korunur. Geçmiş resmî ratingler giriş
+                snapshotlarından alınır.
+              </p>
+            </details>
+          </section>
+        </div>
         <div className="settings-stack">
           <section className="card padded">
             <h2>{sandbox ? "Deneme verileri" : "Veriler ve yedekleme"}</h2>
@@ -3075,8 +3335,10 @@ function SettingsPage({
                   </button>
                 </div>
               ))}
-              <details className="advanced">
-                <summary>Yeni yönetici ekle</summary>
+              <details className="advanced settings-create">
+                <summary className="button secondary">
+                  <Plus size={17} /> Yeni yönetici ekle
+                </summary>
                 <form
                   onSubmit={async (e) => {
                     e.preventDefault();
@@ -3126,25 +3388,15 @@ function SettingsPage({
           <section className="card padded">
             <h2>Son işlemler</h2>
             <div className="audit-list">
-              {state.audit.slice(0, 12).map((a, i) => (
-                <div key={i}>
-                  <span className="audit-dot" />
-                  <div>
-                    <strong>{a.by}</strong>
-                    <span>{auditLabel(a.action)}</span>
-                  </div>
-                  <time>
-                    {new Date(a.at).toLocaleString("tr-TR", {
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-              ))}
+              {auditRows.slice(0, 4)}
               {!state.audit.length && <p className="muted">Henüz işlem yok.</p>}
             </div>
+            {auditRows.length > 4 && (
+              <details className="advanced">
+                <summary>Daha eski işlemleri göster</summary>
+                <div className="audit-list">{auditRows.slice(4)}</div>
+              </details>
+            )}
           </section>
         </div>
       </div>
@@ -3163,6 +3415,7 @@ function auditLabel(action: string) {
         "tournament.lateEntry": "Geç katılım eklendi",
         "round.generate": "Tur eşlendirildi",
         "round.result": "Maç sonucu kaydedildi",
+        "round.results.save": "Tur sonuçları kaydedildi",
         "tournament.finalize": "Turnuva tamamlandı",
         "tournament.reopen": "Turnuva yeniden açıldı",
         "round.undo": "Son tur geri alındı",

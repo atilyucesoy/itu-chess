@@ -122,6 +122,9 @@ test("production HTTPS: shared organizer can complete and reset a test event wit
   ).toBeDisabled();
   await page.getByLabel("Masa 1 sonucu", { exact: true }).selectOption("1-0");
   await page
+    .getByRole("button", { name: "Sonuçları kaydet", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Turnuvayı tamamla", exact: true })
     .click();
   await expect(page.getByText("TURNUVANIN PODYUMU")).toBeVisible();

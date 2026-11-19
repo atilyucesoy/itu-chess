@@ -116,10 +116,10 @@ test("40-player projection fits 1080p, is read-only for spectators and follows t
       .locator(".projection-name")
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-  ).toBeLessThan(24);
+  ).toBeLessThanOrEqual(26);
   await expect(page.locator(".projection-player").first()).toHaveCSS(
     "text-align",
-    "center",
+    "left",
   );
   await expect(page.locator(".projection-column-head").first()).toHaveCSS(
     "text-align",
@@ -147,6 +147,13 @@ test("40-player projection fits 1080p, is read-only for spectators and follows t
         ),
       ),
   ).toBeTruthy();
+  await expect(page.locator(".projection-ratings").first()).toContainText(
+    "İTÜ",
+  );
+  await expect(page.locator(".projection-name").first()).toHaveCSS(
+    "font-weight",
+    "550",
+  );
   await page.screenshot({
     path: "test-results/projection-1080p.png",
     fullPage: true,
@@ -190,13 +197,10 @@ test("40-player projection fits 1080p, is read-only for spectators and follows t
     "2. tur eşlendirmeleri",
   );
   await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.locator(".projection-game")).toHaveCount(20);
   await expect(
     page.getByRole("button", { name: "Sonraki masalar" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Sonraki masalar" }).click();
-  await expect(
-    page.getByRole("button", { name: "Önceki masalar" }),
-  ).toBeEnabled();
+  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () =>
@@ -205,11 +209,16 @@ test("40-player projection fits 1080p, is read-only for spectators and follows t
     ),
   ).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBeTruthy();
+  await expect(page.locator(".projection-game")).toHaveCount(20);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <= innerWidth &&
+          document.documentElement.scrollHeight <= innerHeight,
+      ),
+    )
+    .toBeTruthy();
   await page.screenshot({
     path: "test-results/projection-mobile.png",
     fullPage: true,
