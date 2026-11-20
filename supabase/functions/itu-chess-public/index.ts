@@ -23,15 +23,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return reply({ error: 'unauthorized' }, 401);
   }
 
-  const secret = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default;
   const projectUrl = Deno.env.get('SUPABASE_URL');
-  if (!projectUrl || !secret) return reply({ error: 'unavailable' }, 503);
+  if (!projectUrl) return reply({ error: 'unavailable' }, 503);
 
   try {
-    const url = new URL('/rest/v1/club_state', projectUrl);
+    const url = new URL('/rest/v1/club_publication', projectUrl);
     url.searchParams.set('id', 'eq.1');
     url.searchParams.set('select', 'players:state->players,tournaments:state->tournaments,reference:state->policy->reference');
-    const response = await fetch(url, { headers: { apikey: secret }, signal: AbortSignal.timeout(5000) });
+    const response = await fetch(url, { headers: { apikey: publicKey }, signal: AbortSignal.timeout(5000) });
     if (!response.ok) return reply({ error: 'unavailable' }, 503);
     const [state] = await response.json();
     if (!state) return reply({ error: 'unavailable' }, 503);

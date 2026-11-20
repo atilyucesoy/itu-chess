@@ -10,6 +10,7 @@
     "dev": "concurrently -k \"ENABLE_DEVELOPER_MODE=1 node --env-file-if-exists=.env --import tsx --watch server/index.ts\" \"vite --host 127.0.0.1\"",
     "setup": "node scripts/setup.mjs",
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.server.json",
+    "build:public": "tsc --noEmit && vite build --mode public-site",
     "start": "node --env-file-if-exists=.env dist-server/server/index.js",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "npm run build && playwright test",

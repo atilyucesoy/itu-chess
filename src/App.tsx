@@ -1,3 +1,4 @@
+import { publicSite } from "./publicSite";
 import {
   useState,
   useEffect,
@@ -253,8 +254,11 @@ export default function App() {
     const sequence = ++loadSequence.current;
     setRefreshing(true);
     try {
-      const response = await fetch("/api/state", {
-        headers: stateTag.current ? { "If-None-Match": stateTag.current } : {},
+      const response = await fetch(publicSite?.endpoint ?? "/api/state", {
+        headers: publicSite
+          ? { apikey: publicSite.publishableKey, Accept: "application/vnd.pgrst.object+json" }
+          : stateTag.current ? { "If-None-Match": stateTag.current } : {},
+        credentials: publicSite ? "omit" : "same-origin",
         cache: "no-store",
         signal: AbortSignal.timeout(12_000),
       });
@@ -265,7 +269,7 @@ export default function App() {
         stateTag.current = response.headers.get("ETag");
         setState(data.state);
         setRevision(data.revision);
-        setUser(data.user);
+        setUser(publicSite ? null : data.user);
         setWorkspace(data.workspace ?? "club");
         setSandboxAvailable(data.sandboxAvailable === true);
       }
@@ -562,6 +566,7 @@ export default function App() {
           owner={user?.role === "owner"}
           onEdit={() => playerForm(player)}
           canEdit={!!user}
+          showHistory={!publicSite}
           onOverride={async (value, reason) => {
             if (
               await action("ratings.override", {
@@ -577,6 +582,10 @@ export default function App() {
     });
   }
   function login() {
+    if (publicSite) {
+      location.assign(publicSite.loginUrl);
+      return;
+    }
     setModal({
       title: "Yönetici girişi",
       content: (
@@ -3003,6 +3012,7 @@ function PlayerProfile({
   canEdit,
   onEdit,
   onOverride,
+  showHistory,
 }: {
   player: Player;
   state: PublicState;
@@ -3010,8 +3020,9 @@ function PlayerProfile({
   canEdit: boolean;
   onEdit: () => void;
   onOverride: (v: number, r: string) => Promise<void>;
+  showHistory: boolean;
 }) {
-  const events = state.tournaments
+  const events = (showHistory ? state.tournaments : [])
     .filter(
       (t) =>
         t.status === "finished" && t.entries.some((e) => e.playerId === p.id),
@@ -3032,7 +3043,7 @@ function PlayerProfile({
         <div>
           <Rating itu={p.itu} official={p.official} kind={p.officialType} />
           <p>
-            {p.games} maç · {events.length} turnuva
+            {p.games} maç{showHistory && ` · ${events.length} turnuva`}
             {p.itu !== null && p.games < state.policy.provisionalGames
               ? " · Geçici rating"
               : ""}
@@ -3078,8 +3089,8 @@ function PlayerProfile({
           </div>
         </div>
       )}
-      <h3>Turnuva geçmişi</h3>
-      {!events.length && (
+      {showHistory && <h3>Turnuva geçmişi</h3>}
+      {showHistory && !events.length && (
         <p className="muted">Henüz tamamlanmış turnuvası yok.</p>
       )}
       {[...events].reverse().map((t) => {
